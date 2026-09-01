@@ -5,6 +5,88 @@ if ( ! defined('ABSPATH') ) exit;
 
 final class Assets {
 
+	private const OPTION_ASSET_SIGNATURE = 'f152_asset_signature';
+	private const OPTION_SIGNATURE_CHECKED_AT = 'f152_asset_signature_checked_at';
+	private const FRONT_SIGNATURE_CHECK_INTERVAL = 600;
+	private const ADMIN_SIGNATURE_CHECK_INTERVAL = 60;
+	private static $page_cache_purge_scheduled = false;
+
+	public static function asset_version( string $relative_path ) : string {
+		$relative_path = ltrim( str_replace( '\\', '/', $relative_path ), '/' );
+		$file = F152_DIR . $relative_path;
+		$mtime = is_file( $file ) ? filemtime( $file ) : false;
+		return false !== $mtime && $mtime > 0
+			? F152_VERSION . '.' . (string) $mtime
+			: F152_VERSION;
+	}
+
+	public static function asset_signature() : string {
+		$files = array_merge(
+			glob( F152_DIR . 'assets/js/*.js' ) ?: [],
+			glob( F152_DIR . 'assets/css/*.css' ) ?: [],
+			glob( F152_DIR . 'includes/*.php' ) ?: []
+		);
+		if ( defined( 'F152_FILE' ) && is_file( F152_FILE ) ) {
+			$files[] = F152_FILE;
+		}
+		sort( $files, SORT_STRING );
+
+		$parts = [];
+		foreach ( $files as $file ) {
+			$mtime = is_file( $file ) ? filemtime( $file ) : false;
+			$size  = is_file( $file ) ? filesize( $file ) : false;
+			$parts[] = str_replace( F152_DIR, '', $file ) . ':' . (string) $mtime . ':' . (string) $size;
+		}
+
+		return hash( 'sha256', implode( '|', $parts ) );
+	}
+
+	public static function maybe_refresh_asset_cache( bool $force = false ) : void {
+		$now = time();
+		$last_checked = (int) get_option( self::OPTION_SIGNATURE_CHECKED_AT, 0 );
+		$is_admin_request = function_exists( 'is_admin' ) && is_admin();
+		$interval = $is_admin_request ? self::ADMIN_SIGNATURE_CHECK_INTERVAL : self::FRONT_SIGNATURE_CHECK_INTERVAL;
+		if ( ! $force && $last_checked > 0 && ( $now - $last_checked ) < $interval ) {
+			return;
+		}
+		update_option( self::OPTION_SIGNATURE_CHECKED_AT, $now, false );
+
+		$current = self::asset_signature();
+		$stored  = (string) get_option( self::OPTION_ASSET_SIGNATURE, '' );
+		if ( '' !== $stored && hash_equals( $stored, $current ) ) {
+			return;
+		}
+
+		update_option( self::OPTION_ASSET_SIGNATURE, $current, false );
+		if ( class_exists( '\F152\ServiceScanner' ) && is_callable( [ '\F152\ServiceScanner', 'clear_cache' ] ) ) {
+			ServiceScanner::clear_cache();
+		}
+		self::schedule_page_cache_purge();
+		do_action( 'f152_asset_signature_changed', $stored, $current );
+	}
+
+	public static function handle_upgrader_process_complete( $upgrader, $hook_extra ): void {
+		if ( ! is_array( $hook_extra ) || 'plugin' !== ( $hook_extra['type'] ?? '' ) ) {
+			return;
+		}
+		self::maybe_refresh_asset_cache( true );
+	}
+
+	public static function schedule_page_cache_purge() : void {
+		if ( self::$page_cache_purge_scheduled ) {
+			return;
+		}
+		self::$page_cache_purge_scheduled = true;
+		add_action( 'shutdown', [ __CLASS__, 'purge_page_cache' ], 999 );
+	}
+
+	public static function purge_page_cache() : void {
+		self::$page_cache_purge_scheduled = false;
+		if ( function_exists( 'rocket_clean_domain' ) ) {
+			rocket_clean_domain();
+		}
+	}
+
 	public static function init() : void {
 		add_action('wp_enqueue_scripts', [__CLASS__, 'enqueue_front']);
 		add_action('wp_print_footer_scripts', [__CLASS__, 'print_front_config'], 5);
@@ -26,7 +108,7 @@ final class Assets {
 			'f152',
 			F152_URL . 'assets/css/152.css',
 			[],
-			F152_VERSION
+			self::asset_version( 'assets/css/152.css' )
 		);
 		wp_enqueue_style('f152');
 
@@ -44,7 +126,7 @@ final class Assets {
 			'f152',
 			F152_URL . 'assets/js/152.js',
 			[],
-			F152_VERSION,
+			self::asset_version( 'assets/js/152.js' ),
 			true
 		);
 		wp_enqueue_script('f152');
@@ -80,7 +162,7 @@ final class Assets {
 			'f152-classic-checkout-consent',
 			F152_URL . 'assets/js/checkout-classic-consent.js',
 			[ 'jquery' ],
-			F152_VERSION,
+			self::asset_version( 'assets/js/checkout-classic-consent.js' ),
 			true
 		);
 		wp_enqueue_script( 'f152-classic-checkout-consent' );
@@ -145,7 +227,7 @@ final class Assets {
 			'f152-block-checkout-consent',
 			F152_URL . 'assets/js/checkout-block-consent.js',
 			[],
-			F152_VERSION,
+			self::asset_version( 'assets/js/checkout-block-consent.js' ),
 			true
 		);
 		wp_enqueue_script( 'f152-block-checkout-consent' );
@@ -261,6 +343,9 @@ final class Assets {
 				'embed_map_blocked' => __('Карта скрыта до разрешения аналитических cookie.', 'fz-152-rf'),
 				'embed_video_blocked' => __('Видео скрыто до разрешения аналитических cookie.', 'fz-152-rf'),
 				'embed_content_blocked' => __('Внешнее содержимое скрыто до разрешения аналитических cookie.', 'fz-152-rf'),
+				'embed_map_blocked_marketing' => __('Карта скрыта до разрешения маркетинговых cookie.', 'fz-152-rf'),
+				'embed_video_blocked_marketing' => __('Видео скрыто до разрешения маркетинговых cookie.', 'fz-152-rf'),
+				'embed_content_blocked_marketing' => __('Внешнее содержимое скрыто до разрешения маркетинговых cookie.', 'fz-152-rf'),
 				'embed_allow_map' => __('Разрешить и показать карту', 'fz-152-rf'),
 				'embed_allow_video' => __('Разрешить и показать видео', 'fz-152-rf'),
 				'embed_allow' => __('Разрешить и показать', 'fz-152-rf'),

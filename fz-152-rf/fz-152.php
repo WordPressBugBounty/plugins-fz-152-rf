@@ -2,7 +2,7 @@
 /**
  * Plugin Name: FZ-152 RF
  * Description: Банер куки внизу сайта с кнопками принять/отклонить/настройки, не активные чекбоксы у отзывов, комментов и странице заказа WooCommerce, согласно ФЗ 152. Шаблоны с текстом страниц политик и соглашений.
- * Version: 0.2.4
+ * Version: 0.2.5
  * Author: Котик
  * License: GPLv2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -12,7 +12,7 @@
 
 if ( ! defined('ABSPATH') ) exit;
 
-define('F152_VERSION', '0.2.4');
+define('F152_VERSION', '0.2.5');
 define('F152_FILE', __FILE__);
 define('F152_DIR', plugin_dir_path(__FILE__));
 define('F152_URL', plugin_dir_url(__FILE__));
@@ -32,7 +32,10 @@ require_once F152_DIR . 'includes/class-metrika.php';
 require_once F152_DIR . 'includes/class-embed-blocker.php';
 require_once F152_DIR . 'includes/class-integrations.php';
 require_once F152_DIR . 'includes/class-plugin-detector.php';
+require_once F152_DIR . 'includes/class-service-catalog.php';
+require_once F152_DIR . 'includes/class-policy-services.php';
 require_once F152_DIR . 'includes/class-service-scanner.php';
+require_once F152_DIR . 'includes/class-service-inventory.php';
 require_once F152_DIR . 'includes/class-survey.php';
 require_once F152_DIR . 'includes/class-settings.php';
 require_once F152_DIR . 'includes/class-templates.php';
@@ -40,7 +43,29 @@ require_once F152_DIR . 'includes/class-templates.php';
 
 require_once F152_DIR . 'includes/class-api.php';
 
+if ( class_exists( '\F152\PolicyServices' ) ) {
+	\F152\PolicyServices::init();
+}
+
 add_action( 'init', [ '\F152\Helpers', 'maybe_migrate_legacy_default_texts' ], 1 );
+
+if ( ! function_exists( 'f152_get_capabilities' ) ) {
+	function f152_get_capabilities() : array {
+		if ( class_exists( '\\F152\\API' ) && is_callable( [ '\\F152\\API', 'get_capabilities' ] ) ) {
+			return \F152\API::get_capabilities();
+		}
+		return [];
+	}
+}
+
+if ( ! function_exists( 'f152_has_capability' ) ) {
+	function f152_has_capability( string $capability, int $min_version = 1 ) : bool {
+		if ( class_exists( '\\F152\\API' ) && is_callable( [ '\\F152\\API', 'has_capability' ] ) ) {
+			return \F152\API::has_capability( $capability, $min_version );
+		}
+		return false;
+	}
+}
 
 if ( ! function_exists( 'f152_get_consent_checkbox_html' ) ) {
 	function f152_get_consent_checkbox_html( array $args = [] ) : string {
@@ -237,6 +262,9 @@ add_action( 'added_option', function ( $option, $value ) use ( $f152_service_opt
 	}
 }, 10, 2 );
 unset( $f152_service_option, $f152_service_options );
+
+add_action( 'plugins_loaded', [ '\F152\Assets', 'maybe_refresh_asset_cache' ], 6 );
+add_action( 'upgrader_process_complete', [ '\F152\Assets', 'handle_upgrader_process_complete' ], 10, 2 );
 
 add_action( 'plugins_loaded', function () {
 	if ( class_exists( '\F152\EmbedBlocker' ) ) {

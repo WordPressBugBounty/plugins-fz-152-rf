@@ -1,7 +1,6 @@
 <?php
 /**
- * Очистка опций при удалении плагина ФЗ-152.
- * ВАЖНО: удаление происходит ТОЛЬКО при нажатии "Удалить" на странице плагинов.
+ * Очистка данных при удалении плагина ФЗ-152.
  */
 
 if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
@@ -13,6 +12,8 @@ $f152_opts = [
 	'f152_banner_text',
 	'f152_banner_default_links_migrated_v1',
 	'f152_default_text_links_migrated_v2',
+	'f152_document_defaults_migrated_0_2_5',
+	'f152_seed_main_defaults_done',
 	'f152_site_url',
 	'f152_company_name',
 	'f152_company_inn',
@@ -20,8 +21,13 @@ $f152_opts = [
 
 	'f152_ym_counter',
 	'f152_ym_behavior',
+	'f152_ym_disable_on_reject',
 	'f152_yandex_maps_behavior',
+	'f152_yandex_maps_policy_confirmed',
 	'f152_embed_blocker_version',
+	'f152_asset_signature',
+	'f152_asset_signature_checked_at',
+	'f152_scanner_ack_gtm',
 
 	'f152_popup_upper',
 	'f152_popup_func',
@@ -48,11 +54,23 @@ $f152_opts = [
 	'f152_cookie_consent_version',
 
 	'f152_theme',
+	'f152_btn_settings_view',
+	'f152_btn_radius',
+	'f152_font_size_text',
+	'f152_font_size_btn',
 	'f152_color_bg',
 	'f152_color_text',
 	'f152_color_link',
 	'f152_color_btn_bg',
 	'f152_color_btn_text',
+	'f152_color_btn_accept_bg',
+	'f152_color_btn_accept_text',
+	'f152_color_btn_settings_bg',
+	'f152_color_btn_settings_text',
+	'f152_color_btn_reject_bg',
+	'f152_color_btn_reject_text',
+	'f152_custom_css',
+
 	'f152_text_policy_pd',
 	'f152_text_consent_pd',
 	'f152_text_policy_cookie',
@@ -69,6 +87,12 @@ $f152_opts = [
 
 foreach ( $f152_opts as $f152_opt ) {
 	delete_option( $f152_opt );
+}
+
+delete_transient( 'f152_service_scan_home_v2' );
+delete_transient( 'f152_service_scan_home_v3' );
+for ( $f152_scan_version = 4; $f152_scan_version <= 17; $f152_scan_version++ ) {
+	delete_transient( 'f152_service_scan_site_v' . $f152_scan_version );
 }
 
 global $wpdb;

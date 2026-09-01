@@ -149,7 +149,8 @@ final class API {
 			$context_fields
 		);
 
-		return apply_filters( 'f152/checkbox_html', $html, $args );
+		$filtered = apply_filters( 'f152/checkbox_html', $html, $args );
+		return is_string( $filtered ) ? $filtered : $html;
 	}
 
 	public static function render_checkbox( array $args = [] ) : void {
@@ -229,7 +230,13 @@ final class API {
 			$data['consent_text'] = self::get_consent_text( 'external' );
 		}
 
-		$data = apply_filters( 'f152/consent_log_data', $data );
+		$filtered = apply_filters( 'f152/consent_log_data', $data );
+		if ( ! is_array( $filtered ) ) {
+			$data['_f152_error'] = 'The f152/consent_log_data filter returned a non-array value.';
+			do_action( 'f152/consent_log_failed', $data );
+			return false;
+		}
+		$data = $filtered;
 
 		if ( ! class_exists( '\F152\ConsentLog' ) || ! method_exists( '\F152\ConsentLog', 'log' ) ) {
 			$data['_f152_error'] = 'ConsentLog class or ConsentLog::log() not available.';
@@ -303,6 +310,139 @@ final class API {
 		}
 
 		return self::get_policy_version();
+	}
+
+	public static function get_capabilities() : array {
+		$capabilities = [
+			'external_consent_api'   => 1,
+			'cookie_consent_api'     => 1,
+			'banner_designer_hooks'  => 1,
+			'services_bridge'        => 1,
+			'service_catalog'        => 1,
+			'service_extensions'     => 2,
+			'embed_provider_extensions' => 2,
+			'service_inventory'      => 1,
+			'policy_services'        => 1,
+			'policy_reflection'      => 2,
+			'policy_ownership'       => 1,
+			'free_policy_sync'        => 1,
+			'policy_legacy_adoption' => 1,
+		];
+
+		$base_capabilities = $capabilities;
+		$filtered = apply_filters( 'f152/capabilities', $capabilities );
+
+		$normalized = [];
+		foreach ( $base_capabilities as $name => $version ) {
+			$name = sanitize_key( (string) $name );
+			if ( '' !== $name ) {
+				$normalized[ $name ] = max( 1, (int) $version );
+			}
+		}
+
+		if ( ! is_array( $filtered ) ) {
+			return $normalized;
+		}
+
+		foreach ( $filtered as $name => $version ) {
+			$name = sanitize_key( (string) $name );
+			if ( '' === $name ) {
+				continue;
+			}
+			$version = max( 0, (int) $version );
+			if ( ! isset( $normalized[ $name ] ) || $version > $normalized[ $name ] ) {
+				$normalized[ $name ] = $version;
+			}
+		}
+		return $normalized;
+	}
+
+	public static function has_capability( string $capability, int $min_version = 1 ) : bool {
+		$capability = sanitize_key( $capability );
+		if ( '' === $capability ) {
+			return false;
+		}
+		$capabilities = self::get_capabilities();
+		return isset( $capabilities[ $capability ] )
+			&& (int) $capabilities[ $capability ] >= max( 1, $min_version );
+	}
+
+	public static function services_setting_updated( $old_value = null, $new_value = null ) : void {
+		if ( class_exists( '\\F152\\Settings' ) && is_callable( [ '\\F152\\Settings', 'handle_services_setting_updated' ] ) ) {
+			Settings::handle_services_setting_updated( $old_value, $new_value );
+		}
+	}
+
+	public static function get_service_catalog() : array {
+		return class_exists( '\\F152\\ServiceCatalog' ) && is_callable( [ '\\F152\\ServiceCatalog', 'all' ] )
+			? ServiceCatalog::all()
+			: [];
+	}
+
+	public static function get_service_definition( string $service_id ) : array {
+		return class_exists( '\\F152\\ServiceCatalog' ) && is_callable( [ '\\F152\\ServiceCatalog', 'get' ] )
+			? (array) ServiceCatalog::get( sanitize_key( $service_id ) )
+			: [];
+	}
+
+	public static function get_service_inventory() : array {
+		return class_exists( '\\F152\\ServiceInventory' ) && is_callable( [ '\\F152\\ServiceInventory', 'get' ] )
+			? ServiceInventory::get()
+			: [];
+	}
+
+	public static function get_policy_services_zone_version() : int {
+		return defined( '\\F152\\PolicyServices::ZONE_VERSION' )
+			? max( 1, (int) PolicyServices::ZONE_VERSION )
+			: 0;
+	}
+
+	public static function render_policy_services_zone( string $document, ?array $service_ids = null ) : string {
+		return class_exists( '\\F152\\PolicyServices' ) && is_callable( [ '\\F152\\PolicyServices', 'render_zone' ] )
+			? PolicyServices::render_zone( $document, $service_ids )
+			: '';
+	}
+
+	public static function get_generated_policy_page_id( string $document ) : int {
+		return class_exists( '\\F152\\PolicyServices' ) && is_callable( [ '\\F152\\PolicyServices', 'generated_page_id' ] )
+			? (int) PolicyServices::generated_page_id( $document )
+			: 0;
+	}
+
+	public static function match_known_legacy_policy( string $document, string $content ) : array {
+		return class_exists( '\\F152\\PolicyServices' ) && is_callable( [ '\\F152\\PolicyServices', 'known_legacy_match' ] )
+			? (array) PolicyServices::known_legacy_match( $document, $content )
+			: [];
+	}
+
+	public static function upgrade_known_legacy_policy( string $document, string $content ) : array {
+		return class_exists( '\\F152\\PolicyServices' ) && is_callable( [ '\\F152\\PolicyServices', 'upgrade_known_legacy_content' ] )
+			? (array) PolicyServices::upgrade_known_legacy_content( $document, $content )
+			: [];
+	}
+
+	public static function policy_service_is_reflected( string $service_id ) : bool {
+		return class_exists( '\\F152\\PolicyServices' ) && is_callable( [ '\\F152\\PolicyServices', 'reflected_in_generated_policies' ] )
+			? (bool) PolicyServices::reflected_in_generated_policies( sanitize_key( $service_id ) )
+			: false;
+	}
+
+	public static function get_policy_service_reflection_status( string $service_id ) : string {
+		return class_exists( '\\F152\\PolicyServices' ) && is_callable( [ '\\F152\\PolicyServices', 'reflection_status' ] )
+			? (string) PolicyServices::reflection_status( sanitize_key( $service_id ) )
+			: ( self::policy_service_is_reflected( $service_id ) ? 'managed' : 'missing' );
+	}
+
+	public static function get_free_managed_policy_services() : array {
+		return class_exists( '\\F152\\PolicyServices' ) && is_callable( [ '\\F152\\PolicyServices', 'free_managed_services' ] )
+			? (array) PolicyServices::free_managed_services()
+			: [];
+	}
+
+	public static function policy_has_future_service_markers( string $content ) : bool {
+		return class_exists( '\\F152\\PolicyServices' ) && is_callable( [ '\\F152\\PolicyServices', 'has_future_service_markers' ] )
+			? (bool) PolicyServices::has_future_service_markers( $content )
+			: false;
 	}
 
 	public static function table_ready() : bool {

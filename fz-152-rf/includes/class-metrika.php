@@ -28,7 +28,7 @@ final class Metrika {
                         'f152-metrika',
                         F152_URL . 'assets/js/metrika-loader.js',
                         ['f152'],
-                        F152_VERSION,
+                        Assets::asset_version( 'assets/js/metrika-loader.js' ),
                         true
                 );
         }

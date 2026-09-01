@@ -27,6 +27,13 @@ final class Survey {
 		);
 	}
 
+	private static function pro_buy_url() : string {
+		return (string) apply_filters(
+			'f152_pro_buy_url',
+			'https://kotikblog.ru/product/fz-152-rf-pro/?utm_source=free_plugin&utm_medium=survey&utm_campaign=owner_multisite_discount'
+		);
+	}
+
 	private static function should_show() : bool {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return false;
@@ -48,6 +55,25 @@ final class Survey {
 			echo '<div class="notice notice-success is-dismissible f152-survey-notice"><p>'
 				. esc_html__( 'Спасибо! Ответ сохранён.', 'fz-152-rf' )
 				. '</p></div>';
+			return;
+		}
+
+		if ( 'thanks_owner' === $result ) {
+			$buy_url = self::pro_buy_url();
+			?>
+			<div class="notice notice-success is-dismissible f152-survey-notice"><p><?php esc_html_e( 'Спасибо! Ответ сохранён.', 'fz-152-rf' ); ?></p></div>
+			<section class="f152-partner-card f152-survey-owner-result" aria-labelledby="f152-survey-owner-title">
+				<div class="f152-partner-card__icon" aria-hidden="true"><span class="dashicons dashicons-admin-site-alt3"></span></div>
+				<div class="f152-partner-card__content">
+					<span class="f152-card-eyebrow"><?php esc_html_e( 'Если у вас несколько своих сайтов', 'fz-152-rf' ); ?></span>
+					<h2 id="f152-survey-owner-title"><?php esc_html_e( 'Pro на нескольких сайтах — со скидкой на последующие лицензии', 'fz-152-rf' ); ?></h2>
+					<p><?php esc_html_e( 'Если решите использовать FZ-152 RF Pro на нескольких своих сайтах, для второй и последующих лицензий действует скидка.', 'fz-152-rf' ); ?></p>
+					<?php if ( '' !== $buy_url ) : ?>
+						<a class="button button-primary" href="<?php echo esc_url( $buy_url ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Посмотреть FZ-152 RF Pro', 'fz-152-rf' ); ?></a>
+					<?php endif; ?>
+				</div>
+			</section>
+			<?php
 			return;
 		}
 
@@ -198,7 +224,11 @@ final class Survey {
 		}
 
 		update_option( self::STATUS_OPTION, 'completed', false );
-		$result = in_array( $partner_interest, [ 'yes', 'maybe' ], true ) ? 'thanks_partner' : 'thanks';
+		if ( 'owner' === $role ) {
+			$result = 'thanks_owner';
+		} else {
+			$result = in_array( $partner_interest, [ 'yes', 'maybe' ], true ) ? 'thanks_partner' : 'thanks';
+		}
 		wp_safe_redirect( self::settings_url( $result ) );
 		exit;
 	}

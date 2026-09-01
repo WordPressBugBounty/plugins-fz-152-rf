@@ -71,6 +71,113 @@
 				initPreview();
                 initServiceCategoryTabs();
                 initSurvey();
+                initBrowserScanner();
+        }
+
+
+        function initBrowserScanner() {
+                var root = document.querySelector('[data-f152-browser-scan]');
+                if (!root || typeof window.F152AdminScanner !== 'object' || !window.F152AdminScanner) {
+                        return;
+                }
+
+                var cfg = window.F152AdminScanner;
+                if (!cfg.homeUrl || !cfg.ajaxUrl || !cfg.nonce || typeof window.fetch !== 'function') {
+                        return;
+                }
+
+                var status = root.querySelector('[data-f152-browser-scan-status]');
+                var chip = root.querySelector('[data-f152-browser-scan-chip]');
+                var chipText = root.querySelector('[data-f152-browser-scan-chip-text]');
+
+                function setScanState(state, text) {
+                        if (chip) {
+                                chip.classList.remove('f152-status-chip--scanning', 'f152-status-chip--success', 'f152-status-chip--error');
+                                chip.classList.add('f152-status-chip--' + state);
+                        }
+                        if (chipText) {
+                                chipText.textContent = text;
+                        }
+                        root.setAttribute('aria-busy', state === 'scanning' ? 'true' : 'false');
+                }
+
+                setScanState('scanning', 'Сканирование…');
+                if (status) {
+                        status.textContent = 'Сканирование ещё выполняется. Результат обновится автоматически.';
+                }
+
+                fetch(cfg.homeUrl, {
+                        method: 'GET',
+                        credentials: 'same-origin',
+                        cache: 'no-store',
+                        headers: { 'X-F152-Browser-Scan': '1' }
+                })
+                .then(function(response) {
+                        if (!response.ok) {
+                                throw new Error('HTTP ' + response.status);
+                        }
+                        return response.text();
+                })
+                .then(function(html) {
+                        if (!html) {
+                                throw new Error('empty');
+                        }
+
+                        if (html.length > 5 * 1024 * 1024) {
+                                html = html.slice(0, 5 * 1024 * 1024);
+                        }
+
+                        var body = new FormData();
+                        body.append('action', 'f152_browser_scan_home');
+                        body.append('nonce', cfg.nonce);
+                        body.append('html', html);
+
+                        return fetch(cfg.ajaxUrl, {
+                                method: 'POST',
+                                credentials: 'same-origin',
+                                cache: 'no-store',
+                                body: body
+                        });
+                })
+                .then(function(response) {
+                        if (!response.ok) {
+                                throw new Error('AJAX HTTP ' + response.status);
+                        }
+                        return response.json();
+                })
+                .then(function(payload) {
+                        if (!payload || !payload.success || !payload.data) {
+                                throw new Error('scan failed');
+                        }
+
+                        var labels = Array.isArray(payload.data.labels) ? payload.data.labels : [];
+                        if (payload.data.changed) {
+                                setScanState('scanning', 'Обновляю…');
+                                if (status) {
+                                        status.textContent = labels.length
+                                                ? 'Найдены сервисы: ' + labels.join(', ') + '. Обновляю результаты…'
+                                                : 'Результат проверки изменился. Обновляю страницу…';
+                                }
+                                window.setTimeout(function(){ window.location.reload(); }, 150);
+                                return;
+                        }
+
+                        setScanState('success', 'Готово');
+                        if (status) {
+                                status.textContent = labels.length
+                                        ? 'Проверка завершена. Браузер дополнительно подтвердил на главной странице: ' + labels.join(', ') + '.'
+                                        : 'Проверка завершена. Главная страница дополнительно проверена браузером.';
+                        }
+                })
+                .catch(function(error) {
+                        setScanState('error', 'Не завершено');
+                        if (status) {
+                                status.textContent = 'Проверка браузером не завершилась. Нажмите «Проверить сайт сейчас» или обновите страницу.';
+                        }
+                        if (window.console && typeof window.console.debug === 'function') {
+                                window.console.debug('FZ-152 browser scanner:', error);
+                        }
+                });
         }
 
 

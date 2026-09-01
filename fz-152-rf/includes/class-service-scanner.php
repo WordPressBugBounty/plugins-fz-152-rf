@@ -5,9 +5,12 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 
 final class ServiceScanner {
 
-	private const TRANSIENT_TTL  = 10 * MINUTE_IN_SECONDS;
-	private const RESPONSE_LIMIT = 5 * MB_IN_BYTES;
-	private const TRANSIENT_KEY  = 'f152_service_scan_site_v11';
+	private const TRANSIENT_TTL          = 10 * MINUTE_IN_SECONDS;
+	private const RESPONSE_LIMIT         = 5 * MB_IN_BYTES;
+	private const REQUEST_TIMEOUT        = 15;
+	private const TRANSIENT_KEY          = 'f152_service_scan_site_v24';
+	private const BROWSER_TRANSIENT_KEY  = 'f152_service_scan_browser_home_v2';
+	private const BROWSER_TRANSIENT_TTL  = 60;
 
 	public static function get_issues(): array {
 		$result = self::get_scan_result();
@@ -25,6 +28,10 @@ final class ServiceScanner {
 			}
 
 			$definition = $definitions[ $service_id ];
+			$catalog_definition = class_exists( '\\F152\\ServiceCatalog' ) ? ServiceCatalog::get( (string) $service_id ) : [];
+			if ( 'data_transfer' === sanitize_key( (string) ( $catalog_definition['category'] ?? '' ) ) ) {
+				continue;
+			}
 			$control    = isset( $statuses[ $service_id ] ) && is_array( $statuses[ $service_id ] )
 				? $statuses[ $service_id ]
 				: [];
@@ -39,8 +46,14 @@ final class ServiceScanner {
 				? $detection['locations']
 				: [];
 
-			if ( in_array( $service_id, [ 'yandex_maps', 'google_maps', '2gis_maps', 'vk_video', 'rutube', 'youtube', 'dzen_video' ], true ) ) {
+			if ( 'gtm' === $service_id && ! $configured ) {
+				continue;
+			}
+
+			$is_embed = 'embed' === sanitize_key( (string) ( $control['control_type'] ?? '' ) );
+			if ( $is_embed ) {
 				$mode = isset( $control['mode'] ) ? sanitize_key( (string) $control['mode'] ) : 'always';
+				$embed_type = sanitize_key( (string) ( $control['embed_type'] ?? ( $definition['category'] ?? 'content' ) ) );
 				$found_in_rendered_html = false;
 				foreach ( $locations as $location ) {
 					if ( is_array( $location ) && 'rendered' === ( $location['kind'] ?? '' ) ) {
@@ -58,42 +71,52 @@ final class ServiceScanner {
 				}
 
 				if ( $active && in_array( $mode, [ 'disable_on_reject', 'require_accept' ], true ) && $found_in_rendered_html ) {
-					$message = in_array( $service_id, [ 'vk_video', 'rutube', 'youtube', 'dzen_video' ], true )
-						? __( 'обнаружено в уже отданном HTML несмотря на выбранный режим блокировки. Очистите кэш страниц/CDN; если проблема останется, видео выводится мимо серверной обработки FZ-152', 'fz-152-rf' )
-						: __( 'обнаружены в уже отданном HTML несмотря на выбранный режим блокировки. Очистите кэш страниц/CDN; если проблема останется, карта выводится мимо серверной обработки FZ-152', 'fz-152-rf' );
-				} elseif ( $active ) {
-					if ( 'google_maps' === $service_id ) {
-						$message = __( 'обнаружены на сайте и сейчас загружаются всегда. В настройках Google Maps в Pro можно выбрать скрытие после отказа или показ только после согласия', 'fz-152-rf' );
-					} elseif ( '2gis_maps' === $service_id ) {
-						$message = __( 'обнаружены на сайте и сейчас загружаются всегда. В настройках 2ГИС в Pro можно выбрать скрытие после отказа или показ только после согласия', 'fz-152-rf' );
-					} elseif ( 'vk_video' === $service_id ) {
-						$message = __( 'обнаружено на сайте и сейчас загружается всегда. В настройках VK Видео в Pro можно выбрать скрытие после отказа или показ только после согласия', 'fz-152-rf' );
-					} elseif ( 'rutube' === $service_id ) {
-						$message = __( 'обнаружено на сайте и сейчас загружается всегда. В настройках RUTUBE в Pro можно выбрать скрытие после отказа или показ только после согласия', 'fz-152-rf' );
-					} elseif ( 'youtube' === $service_id ) {
-						$message = __( 'обнаружено на сайте и сейчас загружается всегда. В настройках YouTube в Pro можно выбрать скрытие после отказа или показ только после согласия', 'fz-152-rf' );
-					} elseif ( 'dzen_video' === $service_id ) {
-						$message = __( 'обнаружено на сайте и сейчас загружается всегда. В настройках Дзен Видео в Pro можно выбрать скрытие после отказа или показ только после согласия', 'fz-152-rf' );
+					if ( 'video' === $embed_type ) {
+						$message = __( 'FZ-152 должен скрывать это видео до нужного согласия, но на странице всё ещё найден его обычный код. Сначала очистите кэш сайта и запустите проверку ещё раз. Если сообщение останется — пришлите его в поддержку: видео вставляется способом, который плагин не успевает перехватить.', 'fz-152-rf' );
+					} elseif ( 'map' === $embed_type || 'maps' === $embed_type ) {
+						$message = __( 'FZ-152 должен скрывать эту карту до нужного согласия, но на странице всё ещё найден её обычный код. Сначала очистите кэш сайта и запустите проверку ещё раз. Если сообщение останется — пришлите его в поддержку: карта вставляется способом, который плагин не успевает перехватить.', 'fz-152-rf' );
 					} else {
-						$message = __( 'обнаружены на сайте и сейчас загружаются всегда. Во вкладке «Сервисы и трекеры» можно выбрать режим скрытия после отказа или показа только после согласия', 'fz-152-rf' );
+						$message = __( 'FZ-152 должен блокировать это содержимое до нужного согласия, но на странице всё ещё найден обычный внешний код. Сначала очистите кэш сайта и запустите проверку ещё раз. Если сообщение останется — пришлите его в поддержку.', 'fz-152-rf' );
+					}
+				} elseif ( $active ) {
+					if ( 'video' === $embed_type ) {
+						$message = sprintf(
+							/* translators: %s: external video service name. */
+							__( '%s обнаружено на сайте и сейчас загружается всегда. Во вкладке «Сервисы и трекеры» можно выбрать скрытие после отказа или показ только после согласия', 'fz-152-rf' ),
+							(string) ( $definition['label'] ?? $service_id )
+						);
+					} elseif ( 'map' === $embed_type || 'maps' === $embed_type ) {
+						$message = sprintf(
+							/* translators: %s: external map service name. */
+							__( '%s обнаружены на сайте и сейчас загружаются всегда. Во вкладке «Сервисы и трекеры» можно выбрать скрытие после отказа или показ только после согласия', 'fz-152-rf' ),
+							(string) ( $definition['label'] ?? $service_id )
+						);
+					} else {
+						$message = sprintf(
+							/* translators: %s: external content service name. */
+							__( '%s обнаружено на сайте и сейчас загружается всегда. Во вкладке «Сервисы и трекеры» можно выбрать режим блокировки до согласия', 'fz-152-rf' ),
+							(string) ( $definition['label'] ?? $service_id )
+						);
 					}
 				} elseif ( $available && $configured ) {
-					$message = __( 'обнаружены на сайте, но настроенное управление сейчас не активно. Проверьте настройки и состояние Pro', 'fz-152-rf' );
+					$message = __( 'FZ-152 умеет управлять этим сервисом, но управление сейчас выключено. Откройте «Сервисы и трекеры», проверьте настройку сервиса и, если это функция Pro, состояние лицензии.', 'fz-152-rf' );
 				} elseif ( $available ) {
-					$message = __( 'обнаружены на сайте; текущая конфигурация FZ-152 не управляет их загрузкой', 'fz-152-rf' );
+					$message = __( 'Мы нашли этот сервис на сайте, но FZ-152 сейчас не управляет его загрузкой. Откройте «Сервисы и трекеры» и выберите подходящий режим.', 'fz-152-rf' );
 				} else {
-					$message = __( 'обнаружены на сайте и сейчас не управляются FZ-152', 'fz-152-rf' );
+					$message = __( 'Мы нашли этот сервис на сайте, но эта версия FZ-152 не управляет им автоматически. Проверьте его подключение вручную.', 'fz-152-rf' );
 				}
 			} elseif ( $configured && $active ) {
-				$message = __( 'обнаружен отдельный код вне FZ-152; он может загружаться независимо от настроек cookie. Удалите дублирующую вставку из темы, GTM или другого плагина', 'fz-152-rf' );
+				$message = __( 'На сайте есть ещё один код этого сервиса помимо того, который добавляет FZ-152. Из-за этого сервис может запускаться в обход настроек cookie. Удалите старую вставку из темы, GTM или другого плагина и оставьте только подключение через FZ-152.', 'fz-152-rf' );
+			} elseif ( 'gtm' === $service_id ) {
+				$message = __( 'В FZ-152 настроен Google Tag Manager, но управление им сейчас не активно. Откройте «Сервисы и трекеры» и проверьте настройки GTM и состояние лицензии Pro.', 'fz-152-rf' );
 			} elseif ( 'yandex_metrika' === $service_id ) {
-				$message = __( 'обнаружена вне FZ-152 и сейчас не управляется плагином. Перенесите номер счётчика во вкладку «Сервисы и трекеры» и удалите прежнюю вставку', 'fz-152-rf' );
+				$message = __( 'Мы нашли Яндекс.Метрику, но она подключена не через FZ-152. Откройте «Сервисы и трекеры», укажите номер счётчика и сохраните настройки. Затем удалите прежний код Метрики из темы, GTM или другого плагина, чтобы счётчик не загружался дважды.', 'fz-152-rf' );
 			} elseif ( $available && $configured && ! $active ) {
-				$message = __( 'обнаружен внешний код, а настроенное управление сейчас не активно. Проверьте настройки и состояние Pro; отдельная вставка может загружаться независимо', 'fz-152-rf' );
+				$message = __( 'Мы нашли отдельный код этого сервиса, но управление через FZ-152 сейчас не работает. Откройте «Сервисы и трекеры», проверьте настройку сервиса и состояние Pro. После включения управления удалите старую отдельную вставку.', 'fz-152-rf' );
 			} elseif ( $available ) {
-				$message = __( 'обнаружен внешний код, который сейчас загружается независимо от FZ-152', 'fz-152-rf' );
+				$message = __( 'Мы нашли этот сервис, но он подключён отдельно от FZ-152. Откройте «Сервисы и трекеры» и настройте управление этим сервисом. Если такого пункта там нет — подключение нужно проверить вручную.', 'fz-152-rf' );
 			} else {
-				$message = __( 'обнаружен на сайте и сейчас не управляется FZ-152', 'fz-152-rf' );
+				$message = __( 'Мы нашли этот сервис на сайте, но FZ-152 не умеет управлять им автоматически. Если сервис должен запускаться только после согласия посетителя, настройте это в самом сервисе или плагине, который его подключает.', 'fz-152-rf' );
 			}
 
 			$issues[] = [
@@ -108,16 +131,176 @@ final class ServiceScanner {
 		return $issues;
 	}
 
+	public static function get_scan_snapshot(): array {
+		return self::get_scan_result();
+	}
+
+	public static function clear_cache(): void {
+		self::clear_server_cache();
+		delete_transient( self::BROWSER_TRANSIENT_KEY );
+	}
+
+	public static function clear_server_cache(): void {
+		delete_transient( self::TRANSIENT_KEY );
+
+		foreach ( [
+			'f152_service_scan_home_v2',
+			'f152_service_scan_home_v3',
+			'f152_service_scan_site_v4',
+			'f152_service_scan_site_v5',
+			'f152_service_scan_site_v6',
+			'f152_service_scan_site_v7',
+			'f152_service_scan_site_v8',
+			'f152_service_scan_site_v9',
+			'f152_service_scan_site_v10',
+			'f152_service_scan_site_v11',
+			'f152_service_scan_site_v12',
+			'f152_service_scan_site_v13',
+			'f152_service_scan_site_v14',
+			'f152_service_scan_site_v15',
+			'f152_service_scan_site_v16',
+			'f152_service_scan_site_v17',
+			'f152_service_scan_site_v18',
+			'f152_service_scan_site_v19',
+			'f152_service_scan_site_v20',
+			'f152_service_scan_site_v21',
+			'f152_service_scan_site_v22',
+			'f152_service_scan_site_v23',
+		] as $legacy_key ) {
+			delete_transient( $legacy_key );
+		}
+	}
+
+	public static function get_control_snapshot(): array {
+		return self::get_control_statuses();
+	}
+
 	private static function get_scan_result(): array {
 		$cached = get_transient( self::TRANSIENT_KEY );
 		if ( is_array( $cached ) ) {
 			return $cached;
 		}
 
+		$browser_snapshot = get_transient( self::BROWSER_TRANSIENT_KEY );
+
 		$result = self::scan_site();
+		$result = self::merge_browser_home_snapshot(
+			$result,
+			is_array( $browser_snapshot ) ? $browser_snapshot : []
+		);
 		set_transient( self::TRANSIENT_KEY, $result, self::TRANSIENT_TTL );
 
 		return $result;
+	}
+
+	public static function store_browser_home_html( string $html ): array {
+		if ( strlen( $html ) > self::RESPONSE_LIMIT ) {
+			$html = substr( $html, 0, self::RESPONSE_LIMIT );
+		}
+
+		$definitions = self::definitions();
+		$services = self::empty_service_results( $definitions );
+		if ( '' !== trim( $html ) ) {
+			self::merge_source_into_services(
+				$services,
+				$html,
+				$definitions,
+				[
+					'title' => __( 'Главная страница', 'fz-152-rf' ),
+					'url'   => home_url( '/' ),
+					'kind'  => 'rendered',
+				]
+			);
+		}
+
+		$snapshot = [
+			'ok'         => '' !== trim( $html ),
+			'scanned_at' => time(),
+			'fingerprint'=> self::service_fingerprint( $services ),
+			'services'   => $services,
+		];
+		$previous = get_transient( self::BROWSER_TRANSIENT_KEY );
+		$previous_fingerprint = is_array( $previous ) ? (string) ( $previous['fingerprint'] ?? '' ) : '';
+
+		set_transient( self::BROWSER_TRANSIENT_KEY, $snapshot, self::BROWSER_TRANSIENT_TTL );
+		self::clear_server_cache();
+
+		$labels = [];
+		foreach ( $services as $service_id => $detection ) {
+			if ( empty( $detection['found_external'] ) && empty( $detection['found_managed'] ) ) {
+				continue;
+			}
+			$definition = ServiceCatalog::get( (string) $service_id );
+			$labels[] = sanitize_text_field( (string) ( $definition['label'] ?? $service_id ) );
+		}
+
+		return [
+			'changed' => $previous_fingerprint !== (string) $snapshot['fingerprint'],
+			'labels'  => array_values( array_unique( array_filter( $labels ) ) ),
+		];
+	}
+
+	private static function merge_browser_home_snapshot( array $result, array $browser ): array {
+		if ( empty( $browser['ok'] ) || empty( $browser['services'] ) || ! is_array( $browser['services'] ) ) {
+			return $result;
+		}
+
+		if ( empty( $result['services'] ) || ! is_array( $result['services'] ) ) {
+			$result['services'] = self::empty_service_results( self::definitions() );
+		}
+
+		foreach ( $browser['services'] as $service_id => $detection ) {
+			if ( ! isset( $result['services'][ $service_id ] ) || ! is_array( $detection ) ) {
+				continue;
+			}
+			if ( ! empty( $detection['found_external'] ) ) {
+				$result['services'][ $service_id ]['found_external'] = true;
+			}
+			if ( ! empty( $detection['found_managed'] ) ) {
+				$result['services'][ $service_id ]['found_managed'] = true;
+			}
+			$result['services'][ $service_id ]['ids'] = array_values( array_unique( array_merge(
+				(array) ( $result['services'][ $service_id ]['ids'] ?? [] ),
+				(array) ( $detection['ids'] ?? [] )
+			) ) );
+			foreach ( (array) ( $detection['locations'] ?? [] ) as $location ) {
+				if ( is_array( $location ) ) {
+					self::append_location( $result['services'][ $service_id ]['locations'], $location );
+				}
+			}
+			foreach ( (array) ( $detection['managed_locations'] ?? [] ) as $location ) {
+				if ( is_array( $location ) ) {
+					self::append_location( $result['services'][ $service_id ]['managed_locations'], $location );
+				}
+			}
+		}
+
+		$result['ok'] = true;
+		$result['scan_meta'] = isset( $result['scan_meta'] ) && is_array( $result['scan_meta'] ) ? $result['scan_meta'] : [];
+		$result['scan_meta']['home_ok'] = true;
+		$result['scan_meta']['browser_home_ok'] = true;
+		$result['scan_meta']['browser_scanned_at'] = (int) ( $browser['scanned_at'] ?? 0 );
+		$result['scan_meta']['home_error'] = [];
+		return $result;
+	}
+
+	private static function service_fingerprint( array $services ): string {
+		$compact = [];
+		foreach ( $services as $service_id => $detection ) {
+			if ( ! is_array( $detection ) ) {
+				continue;
+			}
+			$external = ! empty( $detection['found_external'] );
+			$managed  = ! empty( $detection['found_managed'] );
+			if ( ! $external && ! $managed ) {
+				continue;
+			}
+			$ids = array_values( array_unique( array_map( 'strval', (array) ( $detection['ids'] ?? [] ) ) ) );
+			sort( $ids );
+			$compact[ sanitize_key( (string) $service_id ) ] = [ $external ? 1 : 0, $managed ? 1 : 0, $ids ];
+		}
+		ksort( $compact );
+		return md5( wp_json_encode( $compact ) ?: '' );
 	}
 
 	private static function scan_site(): array {
@@ -125,10 +308,19 @@ final class ServiceScanner {
 		$services    = self::empty_service_results( $definitions );
 		$scanned_any = false;
 		$home_url    = home_url( '/' );
+		$scan_meta   = [
+			'home_ok'         => false,
+			'home_error'      => [],
+			'candidate_pages' => 0,
+			'rendered_pages'  => 0,
+			'failed_pages'    => 0,
+			'failed_page_details' => [],
+		];
 
 		$home = self::fetch_url_html( $home_url );
 		if ( ! empty( $home['ok'] ) ) {
 			$scanned_any = true;
+			$scan_meta['home_ok'] = true;
 			self::merge_source_into_services(
 				$services,
 				(string) $home['body'],
@@ -139,6 +331,13 @@ final class ServiceScanner {
 					'kind'  => 'rendered',
 				]
 			);
+		} else {
+			$scan_meta['home_error'] = [
+				'type'       => sanitize_key( (string) ( $home['error_type'] ?? '' ) ),
+				'code'       => sanitize_text_field( (string) ( $home['error_code'] ?? '' ) ),
+				'message'    => sanitize_text_field( (string) ( $home['error_message'] ?? '' ) ),
+				'http_code'  => isset( $home['status_code'] ) ? (int) $home['status_code'] : 0,
+			];
 		}
 
 		$page_ids = get_posts(
@@ -156,9 +355,14 @@ final class ServiceScanner {
 		);
 
 		if ( is_array( $page_ids ) ) {
+			$front_page_id = (int) get_option( 'page_on_front', 0 );
 			foreach ( $page_ids as $page_id ) {
 				$page_id = (int) $page_id;
 				if ( $page_id <= 0 ) {
+					continue;
+				}
+
+				if ( $scan_meta['home_ok'] && $front_page_id > 0 && $page_id === $front_page_id ) {
 					continue;
 				}
 
@@ -167,19 +371,59 @@ final class ServiceScanner {
 					continue;
 				}
 
+				$candidate_definitions = self::get_detected_definitions( $source, $definitions );
+				if ( empty( $candidate_definitions ) ) {
+					continue;
+				}
+				$scan_meta['candidate_pages']++;
+
+				$page_title = get_the_title( $page_id ) ?: sprintf(
+					/* translators: %d: WordPress page ID. */
+					__( 'Страница #%d', 'fz-152-rf' ),
+					$page_id
+				);
+				$page_url = get_permalink( $page_id );
+				if ( ! is_string( $page_url ) || '' === $page_url ) {
+					$scan_meta['failed_pages']++;
+					if ( count( $scan_meta['failed_page_details'] ) < 3 ) {
+						$scan_meta['failed_page_details'][] = [
+							'title' => sanitize_text_field( (string) $page_title ),
+							'url' => '',
+							'error_type' => 'permalink',
+							'error_code' => '',
+							'error_message' => 'WordPress did not return a page URL',
+							'status_code' => 0,
+						];
+					}
+					continue;
+				}
+
+				$rendered = self::fetch_url_html( $page_url );
+				if ( empty( $rendered['ok'] ) ) {
+					$scan_meta['failed_pages']++;
+					if ( count( $scan_meta['failed_page_details'] ) < 3 ) {
+						$scan_meta['failed_page_details'][] = [
+							'title' => sanitize_text_field( (string) $page_title ),
+							'url' => esc_url_raw( $page_url ),
+							'error_type' => sanitize_key( (string) ( $rendered['error_type'] ?? '' ) ),
+							'error_code' => sanitize_text_field( (string) ( $rendered['error_code'] ?? '' ) ),
+							'error_message' => sanitize_text_field( (string) ( $rendered['error_message'] ?? '' ) ),
+							'status_code' => isset( $rendered['status_code'] ) ? (int) $rendered['status_code'] : 0,
+						];
+					}
+					continue;
+				}
+
 				$scanned_any = true;
+				$scan_meta['rendered_pages']++;
 				self::merge_source_into_services(
 					$services,
-					$source,
+					(string) $rendered['body'],
 					$definitions,
 					[
-						'title' => get_the_title( $page_id ) ?: sprintf(
-							/* translators: %d: WordPress page ID. */
-							__( 'Страница #%d', 'fz-152-rf' ),
-							$page_id
-						),
-						'url'   => get_permalink( $page_id ) ?: '',
-						'kind'  => 'stored',
+						'title' => $page_title,
+						'url'   => $page_url,
+						'kind'  => 'rendered',
 					]
 				);
 			}
@@ -190,78 +434,173 @@ final class ServiceScanner {
 			'url'        => $home_url,
 			'scanned_at' => time(),
 			'services'   => $services,
+			'scan_meta'  => $scan_meta,
 		];
 	}
 
 	private static function fetch_url_html( string $url ): array {
-		$scan_url = add_query_arg( 'f152_scan', (string) time(), $url );
 		$response = wp_safe_remote_get(
-			$scan_url,
+			$url,
 			[
-				'timeout'             => 5,
+				'timeout'             => self::REQUEST_TIMEOUT,
 				'redirection'         => 3,
 				'limit_response_size' => self::RESPONSE_LIMIT,
-				'headers'             => [
-					'Cache-Control' => 'no-cache',
-					'Pragma'        => 'no-cache',
-				],
 				'user-agent'          => 'Mozilla/5.0 (compatible; FZ152Scanner/' . F152_VERSION . ')',
 			]
 		);
 
 		if ( is_wp_error( $response ) ) {
-			return [ 'ok' => false, 'body' => '' ];
+			return [
+				'ok'            => false,
+				'body'          => '',
+				'error_type'    => 'request',
+				'error_code'    => (string) $response->get_error_code(),
+				'error_message' => (string) $response->get_error_message(),
+				'status_code'   => 0,
+			];
 		}
 
 		$status_code = (int) wp_remote_retrieve_response_code( $response );
 		$body        = (string) wp_remote_retrieve_body( $response );
-		if ( $status_code < 200 || $status_code >= 400 || '' === $body ) {
-			return [ 'ok' => false, 'body' => '' ];
+		if ( $status_code < 200 || $status_code >= 400 ) {
+			return [
+				'ok'            => false,
+				'body'          => '',
+				'error_type'    => 'http',
+				'error_code'    => '',
+				'error_message' => (string) wp_remote_retrieve_response_message( $response ),
+				'status_code'   => $status_code,
+			];
+		}
+		if ( '' === $body ) {
+			return [
+				'ok'            => false,
+				'body'          => '',
+				'error_type'    => 'empty',
+				'error_code'    => '',
+				'error_message' => 'empty response body',
+				'status_code'   => $status_code,
+			];
 		}
 
-		return [ 'ok' => true, 'body' => $body ];
+		return [ 'ok' => true, 'body' => $body, 'status_code' => $status_code ];
+	}
+
+	private static function get_detected_definitions( string $source, array $definitions ): array {
+		$detected = [];
+		foreach ( $definitions as $service_id => $definition ) {
+			if ( self::is_candidate_source( $source, $definition ) ) {
+				$detected[ $service_id ] = $definition;
+			}
+		}
+
+		return $detected;
+	}
+
+	private static function is_candidate_source( string $source, array $definition ): bool {
+		$patterns = isset( $definition['patterns'] ) && is_array( $definition['patterns'] ) ? $definition['patterns'] : [];
+		$candidate_patterns = isset( $definition['candidate_patterns'] ) && is_array( $definition['candidate_patterns'] )
+			? $definition['candidate_patterns']
+			: [];
+		foreach ( array_merge( $patterns, $candidate_patterns ) as $pattern ) {
+			if ( 1 === preg_match( $pattern, $source ) ) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private static function empty_service_results( array $definitions ): array {
 		$services = [];
 		foreach ( $definitions as $service_id => $unused ) {
 			$services[ $service_id ] = [
-				'found_external' => false,
-				'ids'            => [],
-				'locations'      => [],
+				'found_external'    => false,
+				'found_managed'     => false,
+				'ids'               => [],
+				'locations'         => [],
+				'managed_locations' => [],
 			];
 		}
 		return $services;
 	}
 
 	private static function merge_source_into_services( array &$services, string $source, array $definitions, array $location ): void {
+		$detection_source = self::frontend_detection_source( $source );
+
 		foreach ( $definitions as $service_id => $definition ) {
-			$detection = self::detect_service( $source, $definition );
-			if ( empty( $detection['found_external'] ) ) {
+			$detection = self::detect_service( $detection_source, $definition );
+			$managed   = self::detect_managed_embed( $source, $service_id );
+			if ( empty( $detection['found_external'] ) && ! $managed ) {
 				continue;
 			}
 
-			$services[ $service_id ]['found_external'] = true;
-			$services[ $service_id ]['ids'] = array_values(
-				array_unique( array_merge( $services[ $service_id ]['ids'], $detection['ids'] ) )
-			);
-
-			$url = isset( $location['url'] ) ? esc_url_raw( (string) $location['url'] ) : '';
-			$key = $url ?: sanitize_title( (string) ( $location['title'] ?? '' ) );
-			$known = [];
-			foreach ( $services[ $service_id ]['locations'] as $item ) {
-				$known[] = ! empty( $item['url'] )
-					? (string) $item['url']
-					: sanitize_title( (string) ( $item['title'] ?? '' ) );
+			if ( ! empty( $detection['found_external'] ) ) {
+				$services[ $service_id ]['found_external'] = true;
+				$services[ $service_id ]['ids'] = array_values(
+					array_unique( array_merge( $services[ $service_id ]['ids'], $detection['ids'] ) )
+				);
+				self::append_location( $services[ $service_id ]['locations'], $location );
 			}
-			if ( '' !== $key && ! in_array( $key, $known, true ) ) {
-				$services[ $service_id ]['locations'][] = [
-					'title' => sanitize_text_field( (string) ( $location['title'] ?? '' ) ),
-					'url'   => $url,
-					'kind'  => sanitize_key( (string) ( $location['kind'] ?? 'stored' ) ),
-				];
+
+			if ( $managed ) {
+				$services[ $service_id ]['found_managed'] = true;
+				self::append_location( $services[ $service_id ]['managed_locations'], $location );
 			}
 		}
+	}
+
+	private static function append_location( array &$locations, array $location ): void {
+		$url = isset( $location['url'] ) ? esc_url_raw( (string) $location['url'] ) : '';
+		$key = $url ?: sanitize_title( (string) ( $location['title'] ?? '' ) );
+		if ( '' === $key ) {
+			return;
+		}
+
+		foreach ( $locations as $item ) {
+			$item_key = ! empty( $item['url'] )
+				? (string) $item['url']
+				: sanitize_title( (string) ( $item['title'] ?? '' ) );
+			if ( $key === $item_key ) {
+				return;
+			}
+		}
+
+		$locations[] = [
+			'title' => sanitize_text_field( (string) ( $location['title'] ?? '' ) ),
+			'url'   => $url,
+			'kind'  => sanitize_key( (string) ( $location['kind'] ?? 'stored' ) ),
+		];
+	}
+
+
+	private static function frontend_detection_source( string $html ): string {
+		$without_comments = preg_replace( '~<!--.*?-->~s', ' ', $html );
+		if ( is_string( $without_comments ) ) {
+			$html = $without_comments;
+		}
+
+		$matched = preg_match_all(
+			'~<script\b[^>]*>.*?</script\s*>|<(?:iframe|img|link|embed|object)\b[^>]*>~is',
+			$html,
+			$matches
+		);
+		if ( false === $matched || 0 === $matched || empty( $matches[0] ) ) {
+			return '';
+		}
+		return implode( "\n", $matches[0] );
+	}
+
+	private static function detect_managed_embed( string $html, string $service_id ): bool {
+		$service_id = sanitize_key( $service_id );
+		if ( '' === $service_id ) {
+			return false;
+		}
+
+		$id = preg_quote( $service_id, '~' );
+		return 1 === preg_match(
+			'~\\bdata-f152-embed(?:-script)?\\s*=\\s*([\\\'\"])' . $id . '\\1~i',
+			$html
+		);
 	}
 
 	private static function get_page_source( int $page_id ): string {
@@ -337,134 +676,7 @@ final class ServiceScanner {
 	}
 
 	private static function definitions(): array {
-		return [
-			'yandex_metrika' => [
-				'label'       => 'Яндекс.Метрика',
-				'patterns'    => [
-					'~(?:https?:)?//mc\.yandex\.(?:ru|com)/metrika/tag\.js~i',
-					'~(?:https?:)?//mc\.yandex\.(?:ru|com)/watch/[0-9]+~i',
-					'~\bym\s*\(\s*[\'\"]?[0-9]+[\'\"]?\s*,\s*[\'\"]init[\'\"]~i',
-				],
-				'id_patterns' => [
-					'~\bym\s*\(\s*[\'\"]?([0-9]+)[\'\"]?\s*,\s*[\'\"]init[\'\"]~i',
-					'~mc\.yandex\.(?:ru|com)/watch/([0-9]+)~i',
-				],
-			],
-			'yandex_maps' => [
-				'label'       => 'Яндекс.Карты',
-				'patterns'    => [
-					'~(?:https?:)?//api-maps\.yandex\.(?:ru|com)/services/constructor/1\.0/js/~i',
-					'~(?:https?:)?//api-maps\.yandex\.(?:ru|com)/frame/v1/~i',
-					'~(?:https?:)?//(?:www\.)?yandex\.(?:ru|com)/map-widget/~i',
-				],
-				'id_patterns' => [],
-			],
-			'google_maps' => [
-				'label'       => 'Google Maps',
-				'patterns'    => [
-					'~(?:https?:)?//(?:www\.|maps\.)?google\.[a-z.]+/maps/(?:embed|d/embed)(?:[/?]|$)~i',
-					'~(?:https?:)?//(?:www\.|maps\.)?google\.[a-z.]+/maps\?[^\"\'<>\s]*(?:output(?:=|%3D)embed)~i',
-				],
-				'id_patterns' => [],
-			],
-			'2gis_maps' => [
-				'label'       => '2ГИС',
-				'patterns'    => [
-					'~(?:https?:)?//widgets\.2gis\.com/widget(?:[?/#]|$)~i',
-					'~(?:https?:)?//(?:widgets\.2gis\.com|firmsonmap\.api\.2gis\.ru)/js/DGWidgetLoader\.js~i',
-					'~\bnew\s+DGWidgetLoader\s*\(~i',
-				],
-				'id_patterns' => [],
-			],
-			'vk_video' => [
-				'label'       => 'VK Видео',
-				'patterns'    => [
-					'~(?:https?:)?//(?:www\.)?vk\.com/video_ext\.php(?:[?/#]|$)~i',
-					'~(?:https?:)?//(?:www\.)?vkvideo\.ru/video_ext\.php(?:[?/#]|$)~i',
-					'~(?:https?:)?//(?:www\.)?vkontakte\.ru/video_ext\.php(?:[?/#]|$)~i',
-				],
-				'id_patterns' => [],
-			],
-			'rutube' => [
-				'label'       => 'RUTUBE',
-				'patterns'    => [
-					'~(?:https?:)?//(?:www\.)?rutube\.ru/play/embed/(?:[^\s\"\'<]*)~i',
-				],
-				'id_patterns' => [],
-			],
-
-			'youtube' => [
-				'label'       => 'YouTube',
-				'patterns'    => [
-					'~(?:https?:)?//(?:www\.)?youtube\.com/embed/(?:[^\s"\'<]*)~i',
-					'~(?:https?:)?//(?:www\.)?youtube-nocookie\.com/embed/(?:[^\s"\'<]*)~i',
-				],
-				'id_patterns' => [],
-			],
-			'dzen_video' => [
-				'label'       => 'Дзен Видео',
-				'patterns'    => [
-					'~(?:https?:)?//(?:www\.)?dzen\.ru/embed/(?:[^\s"\'<]*)~i',
-					'~(?:https?:)?//zen\.yandex\.ru/embed/(?:[^\s"\'<]*)~i',
-					'~(?:https?:)?//frontend\.vh\.yandex\.ru/player/(?:[^\s"\'<]*)~i',
-				],
-				'id_patterns' => [],
-			],
-
-			'ga4' => [
-				'label'       => 'Google Analytics 4',
-				'patterns'    => [
-					'~googletagmanager\.com/gtag/js\?[^\"\'<>&\\s]*id=G-[A-Z0-9_-]+~i',
-					'~\bgtag\s*\(\s*[\'\"]config[\'\"]\s*,\s*[\'\"]G-[A-Z0-9_-]+[\'\"]~i',
-				],
-				'id_patterns' => [
-					'~googletagmanager\.com/gtag/js\?[^\"\'<>&\\s]*id=(G-[A-Z0-9_-]+)~i',
-					'~\bgtag\s*\(\s*[\'\"]config[\'\"]\s*,\s*[\'\"](G-[A-Z0-9_-]+)[\'\"]~i',
-				],
-			],
-			'gtm' => [
-				'label'       => 'Google Tag Manager',
-				'patterns'    => [
-					'~googletagmanager\.com/gtm\.js\?[^\"\'<>&\\s]*id=GTM-[A-Z0-9_-]+~i',
-					'~googletagmanager\.com/ns\.html\?[^\"\'<>&\\s]*id=GTM-[A-Z0-9_-]+~i',
-				],
-				'id_patterns' => [
-					'~googletagmanager\.com/(?:gtm\.js|ns\.html)\?[^\"\'<>&\\s]*id=(GTM-[A-Z0-9_-]+)~i',
-				],
-			],
-			'digital_culture' => [
-				'label'       => 'Цифровая культура (PRO.Культура.РФ)',
-				'patterns'    => [
-					'~(?:https?:)?//culturaltracking\.ru/static/js/spxl\.js(?:[?][^\s"\'<]*)?~i',
-				],
-				'id_patterns' => [
-					'~culturaltracking\.ru/static/js/spxl\.js[?][^\s"\'<>&]*pixelId=([0-9]+)~i',
-					'~data-pixel-id=["\']([0-9]+)["\']~i',
-				],
-			],
-			'jivosite' => [
-				'label'       => 'JivoSite',
-				'patterns'    => [
-					'~(?:https?:)?//code\.(?:jivo\.ru|jivosite\.com)/widget/[A-Za-z0-9_-]+~i',
-					'~\bjivo_api\b~i',
-				],
-				'id_patterns' => [
-					'~code\.(?:jivo\.ru|jivosite\.com)/widget/([A-Za-z0-9_-]+)~i',
-				],
-			],
-
-			'vk_ads_pixel' => [
-				'label'       => 'VK Реклама Pixel',
-				'patterns'    => [
-					'~top-fwz1\.mail\.ru/js/code\.js~i',
-					'~top\.mail\.ru/js/code\.js~i',
-					'~\b_tmr\.push\s*\(~i',
-				],
-				'id_patterns' => [
-					'~_tmr\.push\s*\(\s*\{[^}]*\bid\s*:\s*[\'\"]?([0-9]+)[\'\"]?~is',
-				],
-			],
-		];
+		return class_exists( '\\F152\\ServiceCatalog' ) ? ServiceCatalog::definitions() : [];
 	}
 
 	private static function detect_service( string $html, array $definition ): array {
@@ -506,17 +718,83 @@ final class ServiceScanner {
 				'mode'       => sanitize_key( (string) get_option( 'f152_ym_behavior', 'always' ) ),
 			],
 			'yandex_maps' => [
-				'provider'   => 'free',
-				'available'  => true,
-				'configured' => true,
+				'provider'           => 'free',
+				'available'          => true,
+				'configured'         => true,
+				'inventory_evidence' => false,
+				'control_type'       => 'embed',
+				'embed_type'         => 'map',
 				'active'     => (bool) get_option( 'f152_enabled', 1 ),
 				'id'         => '',
 				'mode'       => class_exists( '\F152\Settings' ) ? Settings::get_yandex_maps_behavior() : 'always',
 			],
 		];
 
-		$statuses = apply_filters( 'f152_scanner_service_statuses', $statuses );
+		$free_statuses = $statuses;
+		$filtered = apply_filters( 'f152_scanner_service_statuses', $statuses );
+		$statuses = self::normalize_control_statuses( is_array( $filtered ) ? $filtered : [] );
 
-		return is_array( $statuses ) ? $statuses : [];
+		foreach ( $free_statuses as $service_id => $status ) {
+			$normalized = self::normalize_control_status( (string) $service_id, $status );
+			if ( null !== $normalized ) {
+				$statuses[ sanitize_key( (string) $service_id ) ] = $normalized;
+			}
+		}
+
+		return $statuses;
+	}
+
+	private static function normalize_control_statuses( array $statuses ): array {
+		$result = [];
+		foreach ( $statuses as $service_id => $status ) {
+			$service_id = sanitize_key( (string) $service_id );
+			if ( '' === $service_id || ! is_array( $status ) ) {
+				continue;
+			}
+
+			if ( empty( ServiceCatalog::get( $service_id ) ) ) {
+				continue;
+			}
+			$normalized = self::normalize_control_status( $service_id, $status );
+			if ( null !== $normalized ) {
+				$result[ $service_id ] = $normalized;
+			}
+		}
+		return $result;
+	}
+
+	private static function normalize_control_status( string $service_id, array $status ): ?array {
+		$service_id = sanitize_key( $service_id );
+		if ( '' === $service_id ) {
+			return null;
+		}
+		$mode = sanitize_key( (string) ( $status['mode'] ?? 'always' ) );
+		if ( ! in_array( $mode, [ 'always', 'disable_on_reject', 'require_accept' ], true ) ) {
+			$mode = 'require_accept';
+		}
+		$control_type = sanitize_key( (string) ( $status['control_type'] ?? '' ) );
+		$control_type = 'embed' === $control_type ? 'embed' : '';
+		$embed_type = sanitize_key( (string) ( $status['embed_type'] ?? 'content' ) );
+		$embed_type = in_array( $embed_type, [ 'map', 'maps', 'video', 'content' ], true ) ? $embed_type : 'content';
+		$id = isset( $status['id'] ) && is_scalar( $status['id'] )
+			? sanitize_text_field( (string) $status['id'] )
+			: '';
+
+		$result = [
+			'provider'   => sanitize_key( (string) ( $status['provider'] ?? 'extension' ) ),
+			'available'  => ! empty( $status['available'] ),
+			'configured' => ! empty( $status['configured'] ),
+			'active'     => ! empty( $status['active'] ),
+			'id'         => $id,
+			'mode'       => $mode,
+		];
+		if ( array_key_exists( 'inventory_evidence', $status ) ) {
+			$result['inventory_evidence'] = ! empty( $status['inventory_evidence'] );
+		}
+		if ( '' !== $control_type ) {
+			$result['control_type'] = $control_type;
+			$result['embed_type'] = $embed_type;
+		}
+		return $result;
 	}
 }

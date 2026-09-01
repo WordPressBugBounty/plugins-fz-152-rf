@@ -131,6 +131,11 @@
         }
 
         document.addEventListener('f152:consent-changed', function() {
+                var consent = parseConsent();
+                if (isStarted() && mode !== 'always' && !shouldStart(consent)) {
+                        window.location.reload();
+                        return;
+                }
                 startMetrika();
         });
 

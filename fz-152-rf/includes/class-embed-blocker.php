@@ -57,7 +57,7 @@ final class EmbedBlocker {
 	}
 
 	public static function providers() : array {
-		$providers = [
+		$free_providers = [
 			'yandex_maps' => [
 				'label'        => 'Яндекс.Карты',
 				'type'         => 'map',
@@ -71,8 +71,68 @@ final class EmbedBlocker {
 			],
 		];
 
-		$providers = apply_filters( 'f152_embed_providers', $providers );
-		return is_array( $providers ) ? $providers : [];
+		$providers = apply_filters( 'f152_embed_providers', $free_providers );
+		$providers = is_array( $providers ) ? $providers : [];
+
+		foreach ( $free_providers as $provider_id => $definition ) {
+			$providers[ $provider_id ] = $definition;
+		}
+
+		return self::normalize_providers( $providers );
+	}
+
+	private static function normalize_providers( array $providers ) : array {
+		$normalized = [];
+
+		foreach ( $providers as $provider_id => $provider ) {
+			$provider_id = sanitize_key( (string) $provider_id );
+			if ( '' === $provider_id || isset( $normalized[ $provider_id ] ) || ! is_array( $provider ) ) {
+				continue;
+			}
+
+			$label = sanitize_text_field( (string) ( $provider['label'] ?? '' ) );
+			if ( '' === $label ) {
+				continue;
+			}
+
+			$type = sanitize_key( (string) ( $provider['type'] ?? 'content' ) );
+			$type = in_array( $type, [ 'map', 'video', 'content' ], true ) ? $type : 'content';
+
+			$category = sanitize_key( (string) ( $provider['category'] ?? 'analytics' ) );
+			$category = in_array( $category, [ 'analytics', 'marketing' ], true ) ? $category : 'analytics';
+
+			$mode = sanitize_key( (string) ( $provider['mode'] ?? 'require_accept' ) );
+			$mode = in_array( $mode, [ 'always', 'disable_on_reject', 'require_accept' ], true ) ? $mode : 'require_accept';
+
+			$patterns = [];
+			foreach ( (array) ( $provider['url_patterns'] ?? [] ) as $pattern ) {
+				$pattern = (string) $pattern;
+				if ( '' !== $pattern && false !== @preg_match( $pattern, '' ) ) { // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- validates extension regex without emitting frontend warnings.
+					$patterns[] = $pattern;
+				}
+			}
+
+			$html_filter = $provider['html_filter'] ?? null;
+			if ( empty( $patterns ) && ! is_callable( $html_filter ) ) {
+				continue;
+			}
+
+			$definition = [
+				'label'        => $label,
+				'type'         => $type,
+				'category'     => $category,
+				'mode'         => $mode,
+				'enabled'      => ! empty( $provider['enabled'] ),
+				'url_patterns' => array_values( array_unique( $patterns ) ),
+			];
+			if ( is_callable( $html_filter ) ) {
+				$definition['html_filter'] = $html_filter;
+			}
+
+			$normalized[ $provider_id ] = $definition;
+		}
+
+		return $normalized;
 	}
 
 	public static function filter_html( string $html ) : string {
@@ -290,16 +350,23 @@ final class EmbedBlocker {
 	}
 
 	private static function build_placeholder( string $provider_id, string $token, string $type, string $category, string $mode, string $style = '' ) : string {
-		$is_map   = 'map' === $type;
-		$is_video = 'video' === $type;
+		$is_map       = 'map' === $type;
+		$is_video     = 'video' === $type;
+		$is_marketing = 'marketing' === $category;
 		if ( $is_map ) {
-			$text   = __( 'Карта скрыта до разрешения аналитических cookie.', 'fz-152-rf' );
+			$text   = $is_marketing
+				? __( 'Карта скрыта до разрешения маркетинговых cookie.', 'fz-152-rf' )
+				: __( 'Карта скрыта до разрешения аналитических cookie.', 'fz-152-rf' );
 			$button = __( 'Разрешить и показать карту', 'fz-152-rf' );
 		} elseif ( $is_video ) {
-			$text   = __( 'Видео скрыто до разрешения аналитических cookie.', 'fz-152-rf' );
+			$text   = $is_marketing
+				? __( 'Видео скрыто до разрешения маркетинговых cookie.', 'fz-152-rf' )
+				: __( 'Видео скрыто до разрешения аналитических cookie.', 'fz-152-rf' );
 			$button = __( 'Разрешить и показать видео', 'fz-152-rf' );
 		} else {
-			$text   = __( 'Внешнее содержимое скрыто до разрешения аналитических cookie.', 'fz-152-rf' );
+			$text   = $is_marketing
+				? __( 'Внешнее содержимое скрыто до разрешения маркетинговых cookie.', 'fz-152-rf' )
+				: __( 'Внешнее содержимое скрыто до разрешения аналитических cookie.', 'fz-152-rf' );
 			$button = __( 'Разрешить и показать', 'fz-152-rf' );
 		}
 
@@ -451,14 +518,9 @@ final class EmbedBlocker {
 	}
 
 	private static function clear_scanner_cache() : void {
-		delete_transient( 'f152_service_scan_home_v2' );
-		delete_transient( 'f152_service_scan_home_v3' );
-		delete_transient( 'f152_service_scan_site_v4' );
-		delete_transient( 'f152_service_scan_site_v5' );
-		delete_transient( 'f152_service_scan_site_v6' );
-		delete_transient( 'f152_service_scan_site_v7' );
-		delete_transient( 'f152_service_scan_site_v8' );
-		delete_transient( 'f152_service_scan_site_v9' );
+		if ( class_exists( '\\F152\\ServiceScanner' ) && is_callable( [ '\\F152\\ServiceScanner', 'clear_cache' ] ) ) {
+			ServiceScanner::clear_cache();
+		}
 	}
 
 }

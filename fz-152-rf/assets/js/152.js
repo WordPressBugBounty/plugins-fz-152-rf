@@ -239,14 +239,22 @@
     placeholder.setAttribute('aria-hidden', 'false');
 
     var type = frame.getAttribute('data-f152-embed-type') || 'content';
+    var category = frame.getAttribute('data-f152-embed-category') || 'analytics';
+    var marketing = category === 'marketing';
     var text = document.createElement('div');
     text.className = 'f152-embed-placeholder__text';
     if (type === 'map') {
-      text.textContent = (CFG.i18n && CFG.i18n.embed_map_blocked) || 'Карта скрыта до разрешения аналитических cookie.';
+      text.textContent = marketing
+        ? ((CFG.i18n && CFG.i18n.embed_map_blocked_marketing) || 'Карта скрыта до разрешения маркетинговых cookie.')
+        : ((CFG.i18n && CFG.i18n.embed_map_blocked) || 'Карта скрыта до разрешения аналитических cookie.');
     } else if (type === 'video') {
-      text.textContent = (CFG.i18n && CFG.i18n.embed_video_blocked) || 'Видео скрыто до разрешения аналитических cookie.';
+      text.textContent = marketing
+        ? ((CFG.i18n && CFG.i18n.embed_video_blocked_marketing) || 'Видео скрыто до разрешения маркетинговых cookie.')
+        : ((CFG.i18n && CFG.i18n.embed_video_blocked) || 'Видео скрыто до разрешения аналитических cookie.');
     } else {
-      text.textContent = (CFG.i18n && CFG.i18n.embed_content_blocked) || 'Внешнее содержимое скрыто до разрешения аналитических cookie.';
+      text.textContent = marketing
+        ? ((CFG.i18n && CFG.i18n.embed_content_blocked_marketing) || 'Внешнее содержимое скрыто до разрешения маркетинговых cookie.')
+        : ((CFG.i18n && CFG.i18n.embed_content_blocked) || 'Внешнее содержимое скрыто до разрешения аналитических cookie.');
     }
 
     var button = document.createElement('button');
@@ -371,6 +379,13 @@
       return;
     }
 
+    var currentRuntime = findRuntimeScript(marker);
+    if (marker.getAttribute('data-f152-embed-loading') === '1' && currentRuntime) {
+      if (placeholder) hide(placeholder);
+      return;
+    }
+    if (currentRuntime) currentRuntime.remove();
+
     var src = decodeEmbedSrc(marker.getAttribute('data-f152-embed-src') || '');
     var token = getEmbedToken(marker);
     if (!src || !token) return;
@@ -394,7 +409,24 @@
     runtime.setAttribute('data-nowprocket', '');
     runtime.setAttribute('data-no-optimize', '1');
 
-    marker.setAttribute('data-f152-embed-active', '1');
+    marker.setAttribute('data-f152-embed-loading', '1');
+    marker.setAttribute('data-f152-embed-active', '0');
+
+    runtime.onload = function() {
+      if (findRuntimeScript(marker) !== runtime) return;
+      marker.setAttribute('data-f152-embed-loading', '0');
+      marker.setAttribute('data-f152-embed-active', '1');
+      if (placeholder) hide(placeholder);
+    };
+
+    runtime.onerror = function() {
+      if (findRuntimeScript(marker) === runtime) runtime.remove();
+      marker.setAttribute('data-f152-embed-loading', '0');
+      marker.setAttribute('data-f152-embed-active', '0');
+      if (observer) observer.disconnect();
+      if (placeholder) show(placeholder);
+    };
+
     if (placeholder) hide(placeholder);
     parent.insertBefore(runtime, marker);
 
@@ -407,6 +439,7 @@
     if (!marker) return;
     removeRuntimeMapFrames(marker);
     removeRuntimeScript(marker);
+    marker.setAttribute('data-f152-embed-loading', '0');
     marker.setAttribute('data-f152-embed-active', '0');
 
     var placeholder = findEmbedPlaceholder(marker);

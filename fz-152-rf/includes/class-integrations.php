@@ -15,7 +15,9 @@ final class Integrations {
 			add_action('woocommerce_review_order_before_submit', [__CLASS__, 'render_checkout_checkbox'], 9);
 			add_action('woocommerce_after_checkout_validation',  [__CLASS__, 'validate_checkout'], 10, 2);
 			add_action('woocommerce_checkout_update_order_meta', [__CLASS__, 'save_checkout_meta'], 10, 1);
+			add_action('woocommerce_checkout_order_processed', [__CLASS__, 'finalize_checkout_order'], 20, 3);
 			add_action('woocommerce_set_additional_field_value', [__CLASS__, 'sync_block_checkout_consent'], 10, 4);
+			add_action('woocommerce_store_api_checkout_order_processed', [__CLASS__, 'finalize_block_checkout_order'], 20, 1);
 	
 			add_action('woocommerce_register_form',       [__CLASS__, 'render_register_checkbox'], 9);
 			add_filter('woocommerce_registration_errors', [__CLASS__, 'validate_register'], 10, 3);
@@ -285,6 +287,10 @@ final class Integrations {
                 if ( ! empty( $commentdata['f152_consent_comment'] ) ) {
                         add_comment_meta($comment_ID, 'f152_consent', 1, true);
 
+                        if ( (string) get_comment_meta( $comment_ID, 'f152_consent_logged', true ) === '1' ) {
+                                return;
+                        }
+
                         if ( class_exists('\\F152\\ConsentLog') ) {
                                 $post_id = (int) ( $commentdata['comment_post_ID'] ?? 0 );
                                 $post_type = $post_id > 0 ? get_post_type($post_id) : '';
@@ -306,7 +312,7 @@ final class Integrations {
                                 $policy_version = get_option('f152_policy_version', '');
                                 $policy_url = get_option('f152_link_policy_pd', '');
 
-                                \F152\ConsentLog::log([
+                                $logged = \F152\ConsentLog::log([
                                         'source_type' => $source_type,
                                         'source_id' => $comment_ID,
                                         'email' => $email,
@@ -318,6 +324,9 @@ final class Integrations {
                                         'policy_version' => $policy_version,
                                         'policy_url' => $policy_url,
                                 ]);
+                                if ( $logged ) {
+                                        add_comment_meta( $comment_ID, 'f152_consent_logged', 1, true );
+                                }
                         }
                 }
         }
@@ -443,6 +452,10 @@ final class Integrations {
 
 		update_user_meta( $user_id, '_f152_consent', 1 );
 
+		if ( (string) get_user_meta( $user_id, '_f152_consent_logged', true ) === '1' ) {
+			return;
+		}
+
 		if ( ! class_exists( '\\F152\\ConsentLog' ) ) {
 			return;
 		}
@@ -465,7 +478,7 @@ final class Integrations {
 			}
 		}
 
-		\F152\ConsentLog::log(
+		$logged = \F152\ConsentLog::log(
 			[
 				'source_type'    => 'register',
 				'source_id'      => $user_id,
@@ -482,6 +495,10 @@ final class Integrations {
 				'page_url'       => $page_url,
 			]
 		);
+
+		if ( $logged ) {
+			update_user_meta( $user_id, '_f152_consent_logged', 1 );
+		}
 	}
 
 	public static function validate_checkout($data, \WP_Error $errors) : void {
@@ -523,14 +540,55 @@ final class Integrations {
 		if ( ! (bool) get_option('f152_checkout_enable', 1) ) {
 			return;
 		}
-		
-		if ( self::$checkout_consent_verified ) {
-			update_post_meta( $order_id, '_f152_consent', 1 );
 
-			$order = wc_get_order( $order_id );
-			if ( $order ) {
-				self::log_order_consent( $order, $order_id );
-			}
+		if ( ! self::$checkout_consent_verified ) {
+			return;
+		}
+
+		$order = wc_get_order( $order_id );
+		if ( ! $order instanceof \WC_Order ) {
+			return;
+		}
+
+		$order->update_meta_data( '_f152_consent', 1 );
+		self::log_order_consent( $order, $order_id );
+		$order->save();
+	}
+
+	public static function finalize_checkout_order( $order_id, $posted_data = [], $order = null ) : void {
+		if ( ! (bool) get_option( 'f152_checkout_enable', 1 ) ) {
+			return;
+		}
+
+		if ( ! $order instanceof \WC_Order && is_numeric( $order_id ) ) {
+			$order = wc_get_order( (int) $order_id );
+		}
+
+		if ( ! $order instanceof \WC_Order || (string) $order->get_meta( '_f152_consent', true ) !== '1' ) {
+			return;
+		}
+
+		if ( (string) $order->get_meta( '_f152_consent_logged', true ) === '1' ) {
+			return;
+		}
+
+		if ( self::log_order_consent( $order, (int) $order->get_id() ) ) {
+			$order->save_meta_data();
+		}
+	}
+
+	public static function finalize_block_checkout_order( $order ) : void {
+		if ( ! (bool) get_option( 'f152_checkout_enable', 1 ) || ! $order instanceof \WC_Order ) {
+			return;
+		}
+
+		if ( (string) $order->get_meta( '_f152_consent', true ) !== '1'
+			|| (string) $order->get_meta( '_f152_consent_logged', true ) === '1' ) {
+			return;
+		}
+
+		if ( self::log_order_consent( $order, (int) $order->get_id() ) ) {
+			$order->save_meta_data();
 		}
 	}
 
@@ -638,14 +696,17 @@ final class Integrations {
 
 		$order_id = (int) $wc_object->get_id();
 
-		update_post_meta( $order_id, '_f152_consent', 1 );
-
+		$wc_object->update_meta_data( '_f152_consent', 1 );
 		self::log_order_consent( $wc_object, $order_id );
 	}
 
-	private static function log_order_consent( \WC_Order $order, int $order_id ) : void {
-		if ( ! class_exists( '\\F152\\ConsentLog' ) ) {
-			return;
+	private static function log_order_consent( \WC_Order $order, int $order_id ) : bool {
+		if ( $order_id <= 0 || ! class_exists( '\\F152\\ConsentLog' ) ) {
+			return false;
+		}
+
+		if ( (string) $order->get_meta( '_f152_consent_logged', true ) === '1' ) {
+			return true;
 		}
 
 		$email      = $order->get_billing_email();
@@ -683,7 +744,7 @@ final class Integrations {
 		$policy_version   = get_option( 'f152_policy_version', '' );
 		$policy_url       = get_option( 'f152_link_policy_pd', '' );
 
-		\F152\ConsentLog::log(
+		$logged = \F152\ConsentLog::log(
 			[
 				'source_type'    => 'order',
 				'source_id'      => $order_id,
@@ -698,6 +759,12 @@ final class Integrations {
 				'policy_url'     => $policy_url,
 			]
 		);
+
+		if ( $logged ) {
+			$order->update_meta_data( '_f152_consent_logged', 1 );
+		}
+
+		return $logged;
 	}
 
 	private static function log_diagnostic( string $event ) : void {

@@ -15,6 +15,11 @@ final class Helpers {
 	}
 
 	public static function maybe_migrate_legacy_default_texts() : void {
+		self::maybe_migrate_legacy_inline_defaults();
+		self::maybe_migrate_0_2_4_document_defaults();
+	}
+
+	private static function maybe_migrate_legacy_inline_defaults() : void {
 		if ( get_option( 'f152_default_text_links_migrated_v2' ) ) {
 			return;
 		}
@@ -68,43 +73,67 @@ final class Helpers {
 					[ $popup_site_plain, $popup_policy_plain, $popup_activation_legacy ]
 				);
 			}
-
-			$policy_cookie_default = (string) Templates::default_for_option( 'f152_text_policy_cookie' );
-			if ( '' !== $policy_cookie_default ) {
-				$policy_cookie_legacy = str_replace(
-					'<a href="[f152_link_policy_pd]">Полной политике конфиденциальности</a>',
-					'Полной политике конфиденциальности',
-					$policy_cookie_default
-				);
-				self::migrate_exact_default( 'f152_text_policy_cookie', $policy_cookie_default, [ $policy_cookie_legacy ] );
-			}
-
-			$policy_pd_default = (string) Templates::default_for_option( 'f152_text_policy_pd' );
-			if ( '' !== $policy_pd_default ) {
-				$policy_pd_without_self_link = str_replace(
-					'<a href="[f152_link_policy_pd]">[f152_link_policy_pd]</a>',
-					'[f152_link_policy_pd]',
-					$policy_pd_default
-				);
-				$policy_pd_without_yandex_link = str_replace(
-					'<a href="https://yandex.ru/support/metrika/general/opt-out.html">https://yandex.ru/support/metrika/general/opt-out.html</a>',
-					'https://yandex.ru/support/metrika/general/opt-out.html',
-					$policy_pd_default
-				);
-				$policy_pd_legacy = str_replace(
-					'<a href="https://yandex.ru/support/metrika/general/opt-out.html">https://yandex.ru/support/metrika/general/opt-out.html</a>',
-					'https://yandex.ru/support/metrika/general/opt-out.html',
-					$policy_pd_without_self_link
-				);
-				self::migrate_exact_default(
-					'f152_text_policy_pd',
-					$policy_pd_default,
-					[ $policy_pd_without_self_link, $policy_pd_without_yandex_link, $policy_pd_legacy ]
-				);
-			}
 		}
 
 		update_option( 'f152_default_text_links_migrated_v2', 1, false );
+	}
+
+	private static function maybe_migrate_0_2_4_document_defaults() : void {
+		if ( get_option( 'f152_document_defaults_migrated_0_2_5' ) || ! class_exists( '\\F152\\Templates' ) ) {
+			return;
+		}
+
+		$base = trailingslashit( F152_DIR . 'assets/texts/legacy' );
+		$documents = [
+			'f152_text_policy_pd'         => 'policy_pd_0.2.4.html',
+			'f152_text_consent_pd'        => 'consent_pd_0.2.4.html',
+			'f152_text_policy_cookie'     => 'policy_cookie_0.2.4.html',
+			'f152_text_consent_marketing' => 'consent_marketing_0.2.4.html',
+		];
+
+		foreach ( $documents as $option => $filename ) {
+			$new_default = (string) Templates::default_for_option( $option );
+			$legacy_path = $base . $filename;
+			$legacy = is_readable( $legacy_path ) ? file_get_contents( $legacy_path ) : false; // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- Bundled local template snapshot.
+			if ( '' === $new_default || ! is_string( $legacy ) || '' === $legacy ) {
+				continue;
+			}
+
+			$legacy_defaults = [ $legacy ];
+
+			if ( 'f152_text_policy_cookie' === $option ) {
+				$legacy_defaults[] = str_replace(
+					'<a href="[f152_link_policy_pd]">Полной политике конфиденциальности</a>',
+					'Полной политике конфиденциальности',
+					$legacy
+				);
+			}
+
+			if ( 'f152_text_policy_pd' === $option ) {
+				$without_self_link = str_replace(
+					'<a href="[f152_link_policy_pd]">[f152_link_policy_pd]</a>',
+					'[f152_link_policy_pd]',
+					$legacy
+				);
+				$without_yandex_link = str_replace(
+					'<a href="https://yandex.ru/support/metrika/general/opt-out.html">https://yandex.ru/support/metrika/general/opt-out.html</a>',
+					'https://yandex.ru/support/metrika/general/opt-out.html',
+					$legacy
+				);
+				$without_both_links = str_replace(
+					'<a href="https://yandex.ru/support/metrika/general/opt-out.html">https://yandex.ru/support/metrika/general/opt-out.html</a>',
+					'https://yandex.ru/support/metrika/general/opt-out.html',
+					$without_self_link
+				);
+				$legacy_defaults[] = $without_self_link;
+				$legacy_defaults[] = $without_yandex_link;
+				$legacy_defaults[] = $without_both_links;
+			}
+
+			self::migrate_exact_default( $option, $new_default, array_values( array_unique( $legacy_defaults ) ) );
+		}
+
+		update_option( 'f152_document_defaults_migrated_0_2_5', 1, false );
 	}
 
 	private static function migrate_exact_default( string $option, string $new_default, array $legacy_defaults ) : void {
@@ -133,10 +162,120 @@ final class Helpers {
 		return $url === '' ? '' : esc_url($url);
 	}
 
+	public static function operator_identity() : string {
+		$company_name = trim( (string) self::option('f152_company_name', '') );
+		$company_inn  = trim( (string) self::option('f152_company_inn', '') );
+
+		if ( $company_name === '' ) {
+			return '';
+		}
+
+		$company = esc_html( $company_name );
+		if ( $company_inn !== '' ) {
+			return $company . ' (ИНН ' . esc_html( $company_inn ) . ', далее — «Оператор»)';
+		}
+
+		return $company . ' (далее — «Оператор»)';
+	}
+
+	private static function woocommerce_policy_context_active() : bool {
+		if ( class_exists( '\\WooCommerce' ) || defined( 'WC_VERSION' ) ) {
+			return true;
+		}
+
+		return '' !== trim( (string) get_option( 'woocommerce_version', '' ) );
+	}
+
+
+	private static function marketing_policy_context_active() : bool {
+		if ( '' !== trim( (string) self::option( 'f152_link_consent_marketing', '' ) ) ) {
+			return true;
+		}
+
+		if ( '1' === (string) get_option( 'f152_pro_checkout_marketing_enable', '0' ) ) {
+			return true;
+		}
+
+		$rules = get_option( 'f152_pro_form_rules', [] );
+		if ( is_array( $rules ) ) {
+			foreach ( $rules as $rule ) {
+				if ( is_array( $rule ) && ! empty( $rule['marketing'] ) ) {
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	public static function policy_marketing_purpose_table() : string {
+		if ( ! self::marketing_policy_context_active() ) {
+			return '';
+		}
+
+		return <<<'HTML'
+<table>
+    <tr>
+        <th colspan="2">Цель обработки: направление рекламных и информационно-рекламных сообщений</th>
+    </tr>
+    <tr>
+        <td>Категория персональных данных</td>
+        <td>общие (иные) персональные данные</td>
+    </tr>
+    <tr>
+        <td>Перечень обрабатываемых данных</td>
+        <td>фамилия, имя, отчество — если указаны; адрес электронной почты; номер телефона — только в объёме фактически предоставленных субъектом контактных данных, используемых для выбранного канала рассылки</td>
+    </tr>
+    <tr>
+        <td>Категории субъектов персональных данных</td>
+        <td>пользователи сайта, подписчики и иные физические лица, предоставившие предварительное согласие на получение рекламных сообщений</td>
+    </tr>
+    <tr>
+        <td>Правовое основание</td>
+        <td>согласие субъекта персональных данных (пункт 1 части 1 статьи 6 и статья 9 Федерального закона № 152-ФЗ) и предварительное согласие адресата на получение рекламы по сетям электросвязи (статья 18 Федерального закона № 38-ФЗ «О рекламе»)</td>
+    </tr>
+    <tr>
+        <td>Действия с персональными данными</td>
+        <td>сбор, запись, систематизация, накопление, хранение, уточнение (обновление, изменение), извлечение, использование, передача (предоставление, доступ) — при наличии законного основания и необходимости для рассылки, блокирование, удаление и уничтожение</td>
+    </tr>
+    <tr>
+        <td>Способ обработки персональных данных</td>
+        <td>смешанная обработка с использованием средств автоматизации и без использования таких средств; направление сообщений по фактически предоставленным и используемым каналам связи</td>
+    </tr>
+    <tr>
+        <td>Срок обработки и хранения персональных данных</td>
+        <td>до отзыва согласия на рекламную рассылку либо до прекращения соответствующей цели обработки; после отказа обработка персональных данных в целях продвижения товаров, работ и услуг и направление рекламных сообщений прекращаются незамедлительно; дальнейшая обработка тех же персональных данных допускается только для иных целей при наличии самостоятельного правового основания</td>
+    </tr>
+    <tr>
+        <td>Порядок уничтожения</td>
+        <td>персональные данные, обрабатываемые исключительно для рекламной рассылки и более не необходимые для иной законной цели, удаляются из информационных систем и уничтожаются либо обезличиваются в порядке и сроки, предусмотренные законодательством Российской Федерации</td>
+    </tr>
+</table>
+HTML;
+	}
+
+	public static function policy_order_personal_data_items() : string {
+		if ( ! self::woocommerce_policy_context_active() ) {
+			return '';
+		}
+
+		return '<li>адрес плательщика и/или доставки (страна, регион, населённый пункт, улица, дом, квартира или офис, почтовый индекс) — в объёме, указанном Пользователем при оформлении заказа;</li>'
+			. '<li>сведения о заказе, включая состав и стоимость заказа, выбранные способы доставки и оплаты, комментарий к заказу и иные сведения, необходимые для оформления и исполнения заказа.</li>';
+	}
+
+	public static function policy_order_consent_purpose_item() : string {
+		if ( ! self::woocommerce_policy_context_active() ) {
+			return '';
+		}
+
+		return '<li>оформление, обработка, доставка и сопровождение заказов, сформированных Пользователем в интернет-магазине;</li>';
+	}
+
 	public static function replace_common_macros(string $text) : string {
 		$map = [
 			'[f152_site_url]'             => self::site_url(),
 			'[f152_company_name]'         => esc_html( (string) self::option('f152_company_name', '') ),
+			'[f152_operator_identity]'    => self::operator_identity(),
 			'[f152_company_inn]'          => esc_html( (string) self::option('f152_company_inn', '') ),
 			'[f152_company_email]'        => esc_html( (string) self::option('f152_company_email', '') ),
 			'[f152_policy_version]'       => esc_html( (string) self::option('f152_policy_version', '1.0') ),
@@ -144,6 +283,11 @@ final class Helpers {
 			'[f152_link_consent_pd]'      => self::esc_url_allow_empty( (string) self::option('f152_link_consent_pd', '') ),
 			'[f152_link_policy_cookie]'   => self::esc_url_allow_empty( (string) self::option('f152_link_policy_cookie', '') ),
 			'[f152_link_consent_marketing]' => self::esc_url_allow_empty( (string) self::option('f152_link_consent_marketing', '') ),
+			'[f152_services_policy_pd]'    => class_exists( '\\F152\\PolicyServices' ) ? PolicyServices::render_zone( 'policy_pd' ) : '',
+			'[f152_services_policy_cookie]' => class_exists( '\\F152\\PolicyServices' ) ? PolicyServices::render_zone( 'policy_cookie' ) : '',
+			'[f152_order_personal_data_items]' => self::policy_order_personal_data_items(),
+			'[f152_order_consent_purpose_item]' => self::policy_order_consent_purpose_item(),
+			'[f152_marketing_policy_purpose_table]' => self::policy_marketing_purpose_table(),
 		];
 
 		return strtr($text, $map);
