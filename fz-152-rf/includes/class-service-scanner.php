@@ -11,6 +11,10 @@ final class ServiceScanner {
 	private const TRANSIENT_KEY          = 'f152_service_scan_site_v24';
 	private const BROWSER_TRANSIENT_KEY  = 'f152_service_scan_browser_home_v2';
 	private const BROWSER_TRANSIENT_TTL  = 60;
+	private const LOCK_OPTION            = 'f152_service_scan_lock_v1';
+	private const LOCK_TTL               = 5 * MINUTE_IN_SECONDS;
+
+	private static $lock_token = '';
 
 	public static function get_issues(): array {
 		$result = self::get_scan_result();
@@ -181,16 +185,94 @@ final class ServiceScanner {
 			return $cached;
 		}
 
-		$browser_snapshot = get_transient( self::BROWSER_TRANSIENT_KEY );
+		if ( ! self::may_start_scan() ) {
+			return self::empty_scan_result( 'suppressed_context' );
+		}
 
-		$result = self::scan_site();
-		$result = self::merge_browser_home_snapshot(
-			$result,
-			is_array( $browser_snapshot ) ? $browser_snapshot : []
-		);
-		set_transient( self::TRANSIENT_KEY, $result, self::TRANSIENT_TTL );
+		if ( ! self::acquire_lock() ) {
+			$cached = get_transient( self::TRANSIENT_KEY );
+			return is_array( $cached ) ? $cached : self::empty_scan_result( 'scan_busy' );
+		}
 
-		return $result;
+		try {
+			$browser_snapshot = get_transient( self::BROWSER_TRANSIENT_KEY );
+
+			$result = self::scan_site();
+			$result = self::merge_browser_home_snapshot(
+				$result,
+				is_array( $browser_snapshot ) ? $browser_snapshot : []
+			);
+			set_transient( self::TRANSIENT_KEY, $result, self::TRANSIENT_TTL );
+
+			return $result;
+		} finally {
+			self::release_lock();
+		}
+	}
+
+	private static function may_start_scan(): bool {
+		if ( defined( 'DOING_CRON' ) && DOING_CRON ) {
+			return false;
+		}
+
+		$internal_header = isset( $_SERVER['HTTP_X_F152_SCANNER'] )
+			? sanitize_text_field( wp_unslash( (string) $_SERVER['HTTP_X_F152_SCANNER'] ) )
+			: '';
+		if ( '1' === $internal_header ) {
+			return false;
+		}
+
+		return is_admin() && current_user_can( 'manage_options' );
+	}
+
+	private static function empty_scan_result( string $reason ): array {
+		return [
+			'ok'         => false,
+			'url'        => home_url( '/' ),
+			'scanned_at' => 0,
+			'services'   => self::empty_service_results( self::definitions() ),
+			'scan_meta'  => [
+				'suppressed' => true,
+				'reason'     => sanitize_key( $reason ),
+			],
+		];
+	}
+
+	private static function acquire_lock(): bool {
+		$now = time();
+		$existing = get_option( self::LOCK_OPTION, [] );
+		if ( is_array( $existing ) && (int) ( $existing['expires'] ?? 0 ) > $now ) {
+			return false;
+		}
+
+		if ( false !== $existing && [] !== $existing ) {
+			delete_option( self::LOCK_OPTION );
+		}
+
+		$token = function_exists( 'wp_generate_uuid4' ) ? wp_generate_uuid4() : uniqid( 'f152-', true );
+		$value = [
+			'token'   => $token,
+			'expires' => $now + self::LOCK_TTL,
+		];
+
+		if ( ! add_option( self::LOCK_OPTION, $value, '', false ) ) {
+			return false;
+		}
+
+		self::$lock_token = (string) $token;
+		return true;
+	}
+
+	private static function release_lock(): void {
+		if ( '' === self::$lock_token ) {
+			return;
+		}
+
+		$current = get_option( self::LOCK_OPTION, [] );
+		if ( is_array( $current ) && hash_equals( self::$lock_token, (string) ( $current['token'] ?? '' ) ) ) {
+			delete_option( self::LOCK_OPTION );
+		}
+		self::$lock_token = '';
 	}
 
 	public static function store_browser_home_html( string $html ): array {
@@ -446,6 +528,9 @@ final class ServiceScanner {
 				'redirection'         => 3,
 				'limit_response_size' => self::RESPONSE_LIMIT,
 				'user-agent'          => 'Mozilla/5.0 (compatible; FZ152Scanner/' . F152_VERSION . ')',
+				'headers'             => [
+					'X-F152-Scanner' => '1',
+				],
 			]
 		);
 

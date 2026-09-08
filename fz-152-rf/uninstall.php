@@ -113,3 +113,5 @@ $wpdb->query(
 // phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.SchemaChange
 
 wp_clear_scheduled_hook( 'f152_banner_stats_cleanup' );
+
+delete_option( 'f152_service_scan_lock_v1' );

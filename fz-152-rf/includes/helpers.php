@@ -283,12 +283,27 @@ HTML;
 			'[f152_link_consent_pd]'      => self::esc_url_allow_empty( (string) self::option('f152_link_consent_pd', '') ),
 			'[f152_link_policy_cookie]'   => self::esc_url_allow_empty( (string) self::option('f152_link_policy_cookie', '') ),
 			'[f152_link_consent_marketing]' => self::esc_url_allow_empty( (string) self::option('f152_link_consent_marketing', '') ),
-			'[f152_services_policy_pd]'    => class_exists( '\\F152\\PolicyServices' ) ? PolicyServices::render_zone( 'policy_pd' ) : '',
-			'[f152_services_policy_cookie]' => class_exists( '\\F152\\PolicyServices' ) ? PolicyServices::render_zone( 'policy_cookie' ) : '',
-			'[f152_order_personal_data_items]' => self::policy_order_personal_data_items(),
-			'[f152_order_consent_purpose_item]' => self::policy_order_consent_purpose_item(),
-			'[f152_marketing_policy_purpose_table]' => self::policy_marketing_purpose_table(),
 		];
+
+		if ( false !== strpos( $text, '[f152_services_policy_pd]' ) ) {
+			$map['[f152_services_policy_pd]'] = class_exists( '\\F152\\PolicyServices' )
+				? PolicyServices::render_zone( 'policy_pd' )
+				: '';
+		}
+		if ( false !== strpos( $text, '[f152_services_policy_cookie]' ) ) {
+			$map['[f152_services_policy_cookie]'] = class_exists( '\\F152\\PolicyServices' )
+				? PolicyServices::render_zone( 'policy_cookie' )
+				: '';
+		}
+		if ( false !== strpos( $text, '[f152_order_personal_data_items]' ) ) {
+			$map['[f152_order_personal_data_items]'] = self::policy_order_personal_data_items();
+		}
+		if ( false !== strpos( $text, '[f152_order_consent_purpose_item]' ) ) {
+			$map['[f152_order_consent_purpose_item]'] = self::policy_order_consent_purpose_item();
+		}
+		if ( false !== strpos( $text, '[f152_marketing_policy_purpose_table]' ) ) {
+			$map['[f152_marketing_policy_purpose_table]'] = self::policy_marketing_purpose_table();
+		}
 
 		return strtr($text, $map);
 	}

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: FZ-152 RF
  * Description: Банер куки внизу сайта с кнопками принять/отклонить/настройки, не активные чекбоксы у отзывов, комментов и странице заказа WooCommerce, согласно ФЗ 152. Шаблоны с текстом страниц политик и соглашений.
- * Version: 0.2.5
+ * Version: 0.2.6
  * Author: Котик
  * License: GPLv2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -12,7 +12,7 @@
 
 if ( ! defined('ABSPATH') ) exit;
 
-define('F152_VERSION', '0.2.5');
+define('F152_VERSION', '0.2.6');
 define('F152_FILE', __FILE__);
 define('F152_DIR', plugin_dir_path(__FILE__));
 define('F152_URL', plugin_dir_url(__FILE__));
