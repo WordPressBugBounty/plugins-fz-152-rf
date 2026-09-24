@@ -45,6 +45,21 @@ final class PluginDetector {
 				'check' => static fn() => defined( 'METFORM_VERSION' ) || class_exists( '\MetForm\Plugin' ) || did_action( 'metform/after_load' ),
 			],
 			[
+				'id'    => 'formlayer',
+				'name'  => 'FormLayer',
+				'check' => static fn() => defined( 'FORMLAYER_VERSION' ) || class_exists( '\FormLayer\Frontend' ),
+			],
+			[
+				'id'    => 'formidable',
+				'name'  => 'Formidable Forms',
+				'check' => static fn() => class_exists( 'FrmForm' ),
+			],
+			[
+				'id'    => 'sureforms',
+				'name'  => 'SureForms',
+				'check' => static fn() => defined( 'SRFM_VER' ) || class_exists( '\SRFM\Inc\Form_Submit' ),
+			],
+			[
 				'id'    => 'gravity-forms',
 				'name'  => 'Gravity Forms',
 				'check' => static fn() => defined( 'GF_VERSION' ) || class_exists( 'GFForms' ) || class_exists( 'GFAPI' ),

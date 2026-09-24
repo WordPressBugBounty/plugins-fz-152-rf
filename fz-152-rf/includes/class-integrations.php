@@ -309,7 +309,7 @@ final class Integrations {
                                         : get_option('f152_comment_text', Helpers::default_personal_consent_text());
                                 $consent_text = Helpers::replace_common_macros($consent_text_raw);
 
-                                $policy_version = get_option('f152_policy_version', '');
+                                $policy_version = API::get_policy_version();
                                 $policy_url = get_option('f152_link_policy_pd', '');
 
                                 $logged = \F152\ConsentLog::log([
@@ -488,7 +488,7 @@ final class Integrations {
 				'ip_address'     => sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ?? '' ) ),
 				'user_agent'     => sanitize_text_field( wp_unslash( $_SERVER['HTTP_USER_AGENT'] ?? '' ) ),
 				'consent_text'   => Helpers::replace_common_macros( get_option( 'f152_register_text', Helpers::default_personal_consent_text() ) ),
-				'policy_version' => get_option( 'f152_policy_version', '' ),
+				'policy_version' => API::get_policy_version(),
 				'policy_url'     => get_option( 'f152_link_policy_pd', '' ),
 				'source_plugin'  => 'woocommerce',
 				'source_label'   => 'WooCommerce registration',
@@ -741,7 +741,7 @@ final class Integrations {
 
 		$consent_text_raw = get_option( 'f152_checkout_text', Helpers::default_personal_consent_text() );
 		$consent_text     = Helpers::replace_common_macros( $consent_text_raw );
-		$policy_version   = get_option( 'f152_policy_version', '' );
+		$policy_version   = API::get_policy_version();
 		$policy_url       = get_option( 'f152_link_policy_pd', '' );
 
 		$logged = \F152\ConsentLog::log(

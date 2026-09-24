@@ -13,6 +13,7 @@ final class Settings {
                 self::register_csv_export_handler();
                 add_action( 'admin_post_f152_rescan_site', [ __CLASS__, 'handle_rescan_site' ] );
                 add_action( 'wp_ajax_f152_browser_scan_home', [ __CLASS__, 'handle_browser_scan_home' ] );
+                add_action( 'wp_ajax_f152_browser_scan_site', [ __CLASS__, 'handle_browser_scan_site' ] );
 
                 register_setting($group_toggle, 'f152_enabled', [
                         'type'              => 'boolean',
@@ -91,8 +92,8 @@ final class Settings {
 		]);
 		register_setting($group_main, 'f152_policy_version', [
 			'type'              => 'string',
-			'sanitize_callback' => 'sanitize_text_field',
-			'default'           => '',
+			'sanitize_callback' => [API::class, 'sanitize_policy_version'],
+			'default'           => API::DEFAULT_POLICY_VERSION,
 		]);
 		register_setting($group_main, 'f152_link_consent_pd', [
 			'type'              => 'string',
@@ -309,14 +310,44 @@ final class Settings {
                 $tab_raw = filter_input( INPUT_GET, 'tab', FILTER_UNSAFE_RAW );
                 $tab     = is_string( $tab_raw ) ? sanitize_key( wp_unslash( $tab_raw ) ) : 'main';
 
-                if ( 'main' === $tab ) {
+                if ( 'api' === $tab ) {
+                        wp_enqueue_script(
+                                'f152-api-admin',
+                                F152_URL . 'assets/js/api-admin.js',
+                                [],
+                                Assets::asset_version( 'assets/js/api-admin.js' ),
+                                true
+                        );
+                        wp_localize_script(
+                                'f152-api-admin',
+                                'F152DeveloperAPIAdmin',
+                                [
+                                        'ajaxUrl' => admin_url( 'admin-ajax.php' ),
+                                        'nonce'   => wp_create_nonce( 'f152_developer_api_admin' ),
+                                ]
+                        );
+                }
+
+                $force_scan_raw = filter_input( INPUT_GET, 'f152_force_scan', FILTER_UNSAFE_RAW );
+                $force_scan = is_string( $force_scan_raw ) && '1' === sanitize_text_field( wp_unslash( $force_scan_raw ) );
+
+                if ( in_array( $tab, [ 'main', 'rkn' ], true ) ) {
+                        $scan_plan = class_exists( '\F152\ServiceScanner' ) && is_callable( [ '\F152\ServiceScanner', 'get_browser_scan_plan' ] )
+                                ? \F152\ServiceScanner::get_browser_scan_plan()
+                                : [ 'targets' => [ [ 'url' => home_url( '/' ), 'title' => 'Главная страница', 'home' => true ] ], 'total_pages' => 1, 'truncated' => false ];
                         wp_localize_script(
                                 'f152-admin',
                                 'F152AdminScanner',
                                 [
-                                        'ajaxUrl' => admin_url( 'admin-ajax.php' ),
-                                        'homeUrl' => home_url( '/' ),
-                                        'nonce'   => wp_create_nonce( 'f152_browser_scan_home' ),
+                                        'ajaxUrl'   => admin_url( 'admin-ajax.php' ),
+                                        'nonce'     => wp_create_nonce( 'f152_browser_scan_site' ),
+                                        'targets'   => array_values( (array) ( $scan_plan['targets'] ?? [] ) ),
+                                        'totalPages'=> (int) ( $scan_plan['total_pages'] ?? 0 ),
+                                        'truncated' => ! empty( $scan_plan['truncated'] ),
+                                        'autoRun'   => $force_scan || ( 'rkn' === $tab ? ( (bool) get_option( 'f152_pro_rkn_pending_rebuild', 0 ) || ! get_option( 'f152_pro_rkn_signals', [] ) ) : ( class_exists( '\F152\ServiceScanner' ) && is_callable( [ '\F152\ServiceScanner', 'has_fresh_browser_snapshot' ] )
+                                                ? ! \F152\ServiceScanner::has_fresh_browser_snapshot()
+                                                : true ) ),
+                                        'forceRun'  => $force_scan,
                                 ]
                         );
                 }
@@ -350,7 +381,7 @@ final class Settings {
 			$_GET['subtab'] = $legacy;
 		}
 
-		$allowed_tabs = [ 'main', 'services', 'texts', 'policy_pd', 'consent_pd', 'policy_cookie', 'consent_marketing', 'logs', 'stats', 'integrations', 'custom_css' ];
+		$allowed_tabs = [ 'main', 'services', 'texts', 'policy_pd', 'consent_pd', 'policy_cookie', 'consent_marketing', 'logs', 'stats', 'integrations', 'rkn', 'custom_css', 'api' ];
 		if ( ! in_array( $tab, $allowed_tabs, true ) ) {
 			$tab = 'main';
 		}
@@ -374,7 +405,9 @@ final class Settings {
 			                             <a href="<?php echo esc_url( self::tab_url('logs') ); ?>" class="nav-tab <?php echo esc_attr( $tab==='logs'?'nav-tab-active':'' ); ?>">Журнал согласий</a>
 			                             <a href="<?php echo esc_url( self::tab_url('stats') ); ?>" class="nav-tab <?php echo esc_attr( $tab==='stats'?'nav-tab-active':'' ); ?>">Статистика</a>
 			                             <a href="<?php echo esc_url( self::tab_url('integrations') ); ?>" class="nav-tab f152-nav-tab-pro <?php echo esc_attr( $tab==='integrations'?'nav-tab-active':'' ); ?>"><?php echo esc_html( apply_filters( 'f152_integrations_tab_label', 'Add-on' ) ); ?></a>
+			                             <a href="<?php echo esc_url( self::tab_url('rkn') ); ?>" class="nav-tab f152-nav-tab-pro <?php echo esc_attr( $tab==='rkn'?'nav-tab-active':'' ); ?>">Роскомнадзор</a>
 			                             <a href="<?php echo esc_url( self::tab_url('custom_css') ); ?>" class="nav-tab <?php echo esc_attr( $tab==='custom_css'?'nav-tab-active':'' ); ?>">Кастомный CSS</a>
+			                             <a href="<?php echo esc_url( self::tab_url('api') ); ?>" class="nav-tab <?php echo esc_attr( $tab==='api'?'nav-tab-active':'' ); ?>">API для разработчиков</a>
 			</h2>
 
 			<?php
@@ -408,6 +441,14 @@ final class Settings {
 				}
 			} elseif ( $tab === 'custom_css' ) {
 				self::render_tab_custom_css();
+			} elseif ( $tab === 'api' ) {
+				self::render_tab_api();
+			} elseif ( $tab === 'rkn' ) {
+				if ( has_action( 'f152_render_settings_tab_rkn' ) ) {
+					do_action( 'f152_render_settings_tab_rkn' );
+				} else {
+					self::render_locked_rkn_tab();
+				}
 			}
 			?>
 		</div>
@@ -604,7 +645,7 @@ final class Settings {
 	}
 
 	private static function render_jivosite_pro_preview() : void {
-		$buy_url = apply_filters( 'f152_pro_buy_url', 'https://kotikblog.ru/product/fz-152-rf-pro/' );
+		$buy_url = apply_filters( 'f152_pro_buy_url', add_query_arg( [ 'utm_source' => 'free_plugin', 'utm_medium' => 'services_tab', 'utm_campaign' => 'pro_upgrade', 'utm_content' => 'jivosite' ], F152_PURCHASE_URL ) );
 		?>
 		<div class="f152-service-card f152-service-card--pro-preview" data-f152-service-category="consultants">
 			<div class="f152-service-card__heading">
@@ -636,7 +677,7 @@ final class Settings {
 	}
 
 	private static function render_2gis_pro_preview() : void {
-		$buy_url = apply_filters( 'f152_pro_buy_url', 'https://kotikblog.ru/product/fz-152-rf-pro/' );
+		$buy_url = apply_filters( 'f152_pro_buy_url', add_query_arg( [ 'utm_source' => 'free_plugin', 'utm_medium' => 'services_tab', 'utm_campaign' => 'pro_upgrade', 'utm_content' => '2gis' ], F152_PURCHASE_URL ) );
 		?>
 		<div class="f152-service-card f152-service-card--pro-preview" data-f152-service-category="maps">
 			<div class="f152-service-card__heading">
@@ -663,7 +704,7 @@ final class Settings {
 	}
 
 	private static function render_google_maps_pro_preview() : void {
-		$buy_url = apply_filters( 'f152_pro_buy_url', 'https://kotikblog.ru/product/fz-152-rf-pro/' );
+		$buy_url = apply_filters( 'f152_pro_buy_url', add_query_arg( [ 'utm_source' => 'free_plugin', 'utm_medium' => 'services_tab', 'utm_campaign' => 'pro_upgrade', 'utm_content' => 'google_maps' ], F152_PURCHASE_URL ) );
 		?>
 		<div class="f152-service-card f152-service-card--pro-preview" data-f152-service-category="maps">
 			<div class="f152-service-card__heading">
@@ -690,7 +731,7 @@ final class Settings {
 	}
 
 	private static function render_vk_video_pro_preview() : void {
-		$buy_url = apply_filters( 'f152_pro_buy_url', 'https://kotikblog.ru/product/fz-152-rf-pro/' );
+		$buy_url = apply_filters( 'f152_pro_buy_url', add_query_arg( [ 'utm_source' => 'free_plugin', 'utm_medium' => 'services_tab', 'utm_campaign' => 'pro_upgrade', 'utm_content' => 'vk_video' ], F152_PURCHASE_URL ) );
 		?>
 		<div class="f152-service-card f152-service-card--pro-preview" data-f152-service-category="video">
 			<div class="f152-service-card__heading">
@@ -717,7 +758,7 @@ final class Settings {
 	}
 
 	private static function render_rutube_pro_preview() : void {
-		$buy_url = apply_filters( 'f152_pro_buy_url', 'https://kotikblog.ru/product/fz-152-rf-pro/' );
+		$buy_url = apply_filters( 'f152_pro_buy_url', add_query_arg( [ 'utm_source' => 'free_plugin', 'utm_medium' => 'services_tab', 'utm_campaign' => 'pro_upgrade', 'utm_content' => 'rutube' ], F152_PURCHASE_URL ) );
 		?>
 		<div class="f152-service-card f152-service-card--pro-preview" data-f152-service-category="video">
 			<div class="f152-service-card__heading">
@@ -744,7 +785,7 @@ final class Settings {
 	}
 
 	private static function render_youtube_pro_preview() : void {
-		$buy_url = apply_filters( 'f152_pro_buy_url', 'https://kotikblog.ru/product/fz-152-rf-pro/' );
+		$buy_url = apply_filters( 'f152_pro_buy_url', add_query_arg( [ 'utm_source' => 'free_plugin', 'utm_medium' => 'services_tab', 'utm_campaign' => 'pro_upgrade', 'utm_content' => 'youtube' ], F152_PURCHASE_URL ) );
 		?>
 		<div class="f152-service-card f152-service-card--pro-preview" data-f152-service-category="video">
 			<div class="f152-service-card__heading">
@@ -767,7 +808,7 @@ final class Settings {
 	}
 
 	private static function render_dzen_video_pro_preview() : void {
-		$buy_url = apply_filters( 'f152_pro_buy_url', 'https://kotikblog.ru/product/fz-152-rf-pro/' );
+		$buy_url = apply_filters( 'f152_pro_buy_url', add_query_arg( [ 'utm_source' => 'free_plugin', 'utm_medium' => 'services_tab', 'utm_campaign' => 'pro_upgrade', 'utm_content' => 'dzen_video' ], F152_PURCHASE_URL ) );
 		?>
 		<div class="f152-service-card f152-service-card--pro-preview" data-f152-service-category="video">
 			<div class="f152-service-card__heading">
@@ -790,7 +831,7 @@ final class Settings {
 	}
 
 	private static function render_ga4_pro_preview() : void {
-		$buy_url = apply_filters( 'f152_pro_buy_url', 'https://kotikblog.ru/product/fz-152-rf-pro/' );
+		$buy_url = apply_filters( 'f152_pro_buy_url', add_query_arg( [ 'utm_source' => 'free_plugin', 'utm_medium' => 'services_tab', 'utm_campaign' => 'pro_upgrade', 'utm_content' => 'ga4' ], F152_PURCHASE_URL ) );
 		?>
 		<div class="f152-service-card f152-service-card--pro-preview" data-f152-service-category="trackers">
 			<div class="f152-service-card__heading">
@@ -822,7 +863,7 @@ final class Settings {
 	}
 
 	private static function render_gtm_pro_preview() : void {
-		$buy_url = apply_filters( 'f152_pro_buy_url', 'https://kotikblog.ru/product/fz-152-rf-pro/' );
+		$buy_url = apply_filters( 'f152_pro_buy_url', add_query_arg( [ 'utm_source' => 'free_plugin', 'utm_medium' => 'services_tab', 'utm_campaign' => 'pro_upgrade', 'utm_content' => 'gtm' ], F152_PURCHASE_URL ) );
 		?>
 		<div class="f152-service-card f152-service-card--pro-preview" data-f152-service-category="trackers">
 			<div class="f152-service-card__heading">
@@ -854,7 +895,7 @@ final class Settings {
 	}
 
 	private static function render_roistat_pro_preview() : void {
-		$buy_url = apply_filters( 'f152_pro_buy_url', 'https://kotikblog.ru/product/fz-152-rf-pro/' );
+		$buy_url = apply_filters( 'f152_pro_buy_url', add_query_arg( [ 'utm_source' => 'free_plugin', 'utm_medium' => 'services_tab', 'utm_campaign' => 'pro_upgrade', 'utm_content' => 'roistat' ], F152_PURCHASE_URL ) );
 		?>
 		<div class="f152-service-card f152-service-card--pro-preview" data-f152-service-category="trackers">
 			<div class="f152-service-card__heading">
@@ -886,7 +927,7 @@ final class Settings {
 	}
 
 	private static function render_digital_culture_pro_preview() : void {
-		$buy_url = apply_filters( 'f152_pro_buy_url', 'https://kotikblog.ru/product/fz-152-rf-pro/' );
+		$buy_url = apply_filters( 'f152_pro_buy_url', add_query_arg( [ 'utm_source' => 'free_plugin', 'utm_medium' => 'services_tab', 'utm_campaign' => 'pro_upgrade', 'utm_content' => 'digital_culture' ], F152_PURCHASE_URL ) );
 		?>
 		<div class="f152-service-card f152-service-card--pro-preview" data-f152-service-category="trackers">
 			<div class="f152-service-card__heading">
@@ -918,7 +959,7 @@ final class Settings {
 	}
 
 	private static function render_vk_ads_pro_preview() : void {
-		$buy_url = apply_filters( 'f152_pro_buy_url', 'https://kotikblog.ru/product/fz-152-rf-pro/' );
+		$buy_url = apply_filters( 'f152_pro_buy_url', add_query_arg( [ 'utm_source' => 'free_plugin', 'utm_medium' => 'services_tab', 'utm_campaign' => 'pro_upgrade', 'utm_content' => 'vk_ads' ], F152_PURCHASE_URL ) );
 		?>
 		<div class="f152-service-card f152-service-card--pro-preview" data-f152-service-category="trackers">
 			<div class="f152-service-card__heading">
@@ -981,6 +1022,127 @@ final class Settings {
 		<?php
 	}
 
+	private static function render_tab_api() : void {
+		$api_version = class_exists( '\F152\API' ) ? API::get_api_version() : '1.0';
+		$tokens = class_exists( '\F152\DeveloperAPI' ) ? DeveloperAPI::admin_tokens() : [];
+		$max_tokens = class_exists( '\F152\DeveloperAPI' ) ? DeveloperAPI::max_tokens() : 0;
+		$status_url = rest_url( 'f152/v1/status' );
+		$consents_url = rest_url( 'f152/v1/consents' );
+		?>
+		<div class="f152-settings-stack f152-api-docs">
+			<section class="f152-settings-card">
+				<div class="f152-settings-card__header">
+					<div>
+						<span class="f152-card-eyebrow">Public API v<?php echo esc_html( $api_version ); ?></span>
+						<h2>API для разработчиков</h2>
+						<p>По предложениям разработчиков других плагинов и некоторых SaaS сервисов добавил API. Теперь вы можете добавить свои интеграции с плагином и не создавать лишнего кода в своих проектах. Если вам не хватает функционала, напишите мне на почту <a href="mailto:support@fz152rf.ru">support@fz152rf.ru</a>. Если используете нейросети для разработки, то скопируйте текст с этой страницы и вставьте в свою нейросеть, она подскажет вам, как правильно создать интеграцию своего плагина или сервиса с ФЗ 152.</p>
+						<p>Интегрируйте свои формы, плагины, CRM и SaaS с FZ-152 RF без прямого доступа к внутренним классам и базе данных.</p>
+					</div>
+				</div>
+				<div class="f152-settings-card__body">
+					<div class="notice notice-warning inline"><p><strong>Граница безопасности:</strong> удалённый REST API работает только на чтение. Через токен нельзя создать, изменить или удалить запись журнала. Для записи согласия используйте PHP API внутри WordPress.</p></div>
+					<p><strong>Стабильный контракт:</strong> функции <code>f152_*</code>, перечисленные на этой странице, считаются публичными. Классы пространства имён <code>F152\*</code> — внутренние и могут меняться.</p>
+				</div>
+			</section>
+
+			<section class="f152-settings-card">
+				<div class="f152-settings-card__header"><div><span class="f152-card-eyebrow">PHP</span><h2>Безопасная интеграция формы</h2><p>Для новых интеграций используйте одну высокоуровневую функцию: она сама проверит согласие и запишет доказательную часть на сервере.</p></div></div>
+				<div class="f152-settings-card__body">
+					<h3>1. Выведите чекбокс</h3>
+					<pre class="f152-api-code"><code><?php echo esc_html("echo f152_get_consent_checkbox_html( [\n    'source_type'   => 'my_plugin',\n    'source_id'     => (string) \$form_id,\n    'source_plugin' => 'my-plugin/my-plugin.php',\n    'source_label'  => 'My Plugin',\n    'form_id'       => (string) \$form_id,\n    'form_title'    => \$form_title,\n] );"); ?></code></pre>
+					<h3>2. В серверном обработчике после своей валидации/антиспама, но до принятия заявки проверьте и запишите согласие</h3>
+					<pre class="f152-api-code"><code><?php echo esc_html("\$result = f152_process_external_consent( \$_POST, [\n    'source_type'   => 'my_plugin',\n    'source_id'     => (string) \$form_id,\n    'source_plugin' => 'my-plugin/my-plugin.php',\n    'source_label'  => 'My Plugin',\n    'form_id'       => (string) \$form_id,\n    'form_title'    => \$form_title,\n    'email'         => \$email,\n    'full_name'     => \$name,\n    'phone'         => \$phone,\n    'log_context'   => [ 'submission_id' => \$submission_id ],\n] );\n\nif ( is_wp_error( \$result ) ) {\n    // Не помечайте отправку как согласованную. Обработайте ошибку по логике своей формы.\n}"); ?></code></pre>
+					<p>Сначала выполните штатную серверную валидацию и антиспам своей формы. Затем вызовите FZ-152 до финального принятия/отправки заявки. Если метод вернул <code>WP_Error</code>, обработчик не должен продолжать отправку. Успешный вызов фиксирует событие согласия; он не является подтверждением успешной доставки самой заявки.</p>
+					<p>Поля <code>IP</code>, <code>User-Agent</code>, <code>user_id</code>, текст и версия согласия, URL политики, timestamp и <code>consent_hash</code> формируются FZ-152 на сервере и не принимаются от интеграции.</p>
+					<p><strong>Для безопасного high-level flow используйте стандартный текст согласия FZ-152:</strong> не передавайте в <code>f152_get_consent_checkbox_html()</code> собственные <code>text</code> или нестандартный <code>context</code>. Если интеграции нужен отдельный юридический текст, используйте специализированный адаптер и низкоуровневый API с собственной серверной проверкой.</p>
+					<p><code>log_context</code> предназначен только для небольшой служебной метаинформации. Не передавайте туда весь <code>$_POST</code>, пароли, платёжные реквизиты, cookies, API-ключи или токены. FZ-152 отбрасывает очевидно секретные ключи и ограничивает размер context, но интеграция всё равно должна соблюдать принцип минимизации данных.</p>
+					<details><summary><strong>Низкоуровневые функции совместимости</strong></summary><p><code>f152_verify_consent()</code> и <code>f152_log_external_consent()</code> сохранены без изменения для существующих интеграций FZ-152 RF Pro. Для нового кода предпочтительнее <code>f152_process_external_consent()</code>, чтобы случайно не записать непроверенное согласие.</p></details>
+				</div>
+			</section>
+
+			<section class="f152-settings-card">
+				<div class="f152-settings-card__header"><div><span class="f152-card-eyebrow">PHP reference</span><h2>Публичные функции</h2></div></div>
+				<div class="f152-settings-card__body">
+					<table class="widefat striped"><tbody>
+					<tr><td><code>f152_get_api_version()</code></td><td>Версия публичного API.</td></tr>
+					<tr><td><code>f152_get_capabilities()</code></td><td>Карта доступных возможностей API.</td></tr>
+					<tr><td><code>f152_has_capability( $name, $min_version )</code></td><td>Проверка конкретной возможности без привязки к версии плагина.</td></tr>
+					<tr><td><code>f152_get_consent_checkbox_html( $args )</code></td><td>HTML стандартного чекбокса с nonce и контекстом.</td></tr>
+					<tr><td><code>f152_render_consent_checkbox( $args )</code></td><td>Вывод стандартного чекбокса.</td></tr>
+					<tr><td><code>f152_process_external_consent( $request, $integration )</code></td><td>Рекомендуемый безопасный verify + log. Возвращает ID записи или <code>WP_Error</code>.</td></tr>
+					<tr><td><code>f152_verify_consent( $request, $args )</code></td><td>Низкоуровневая проверка nonce и чекбокса. Сохранена для совместимости существующих интеграций.</td></tr>
+					<tr><td><code>f152_log_external_consent( $data )</code></td><td>Низкоуровневая запись. Не проверяет согласие сама; для нового кода используйте <code>f152_process_external_consent()</code>.</td></tr>
+					<tr><td><code>f152_get_consent_text( $context )</code></td><td>Текущий серверный текст согласия.</td></tr>
+					<tr><td><code>f152_get_policy_version()</code></td><td>Текущая версия политики.</td></tr>
+					<tr><td><code>f152_get_policy_url()</code></td><td>URL политики обработки ПД.</td></tr>
+					<tr><td><code>f152_get_cookie_consent_state()</code></td><td>Состояние cookie-согласия текущего посетителя.</td></tr>
+					<tr><td><code>f152_is_cookie_category_allowed( 'analytics' )</code></td><td>Разрешена ли категория <code>analytics</code> или <code>marketing</code>.</td></tr>
+					<tr><td><code>f152_has_current_cookie_consent()</code></td><td>Есть ли выбор для текущей версии политики.</td></tr>
+					<tr><td><code>f152_get_cookie_consent_version()</code></td><td>Версия cookie-согласия.</td></tr>
+					</tbody></table>
+				</div>
+			</section>
+
+			<section class="f152-settings-card">
+				<div class="f152-settings-card__header"><div><span class="f152-card-eyebrow">JavaScript</span><h2>JS API</h2><p>JS API предназначен для чтения выбора посетителя и открытия штатных настроек. Запись журнала из браузера намеренно отсутствует.</p></div></div>
+				<div class="f152-settings-card__body">
+					<pre class="f152-api-code"><code><?php echo esc_html("F152Consent.getState();\nF152Consent.isAllowed('analytics');\nF152Consent.isAllowed('marketing');\nF152Consent.hasCurrentConsent();\nF152Consent.getVersion();\nF152Consent.openSettings();\n\ndocument.addEventListener('f152:consent-changed', function (event) {\n    console.log(event.detail);\n});"); ?></code></pre>
+					<p><code>allowCategory()</code> используется внутренними компонентами FZ-152 для кнопок «разрешить и показать» и не является частью публичного стабильного API.</p>
+				</div>
+			</section>
+
+			<section class="f152-settings-card" id="f152-api-tokens">
+				<div class="f152-settings-card__header"><div><span class="f152-card-eyebrow">Server-to-server</span><h2>Токены удалённого API</h2><p>Для CRM и SaaS. Токен передаётся только в HTTP-заголовке и даёт только чтение.</p></div></div>
+				<div class="f152-settings-card__body">
+					<div class="notice notice-warning inline"><p><strong>Используйте HTTPS.</strong> Никогда не помещайте токен в JavaScript сайта, HTML, URL или query string. Храните его только на сервере подключаемой CRM/SaaS. В WordPress сохраняется только HMAC-хэш токена.</p></div>
+					<div data-f152-api-message hidden></div>
+					<form data-f152-api-create-form>
+						<p><label><strong>Название токена</strong><br><input type="text" name="token_name" class="regular-text" maxlength="100" placeholder="Например: CRM production" required></label></p>
+						<p><label><input type="checkbox" name="read_consents" value="1"> Разрешить чтение журнала согласий</label><br><span class="description">Включает email, имя, телефон, источник формы, текст/версию согласия и связанные URL.</span></p>
+						<p><label><input type="checkbox" name="read_technical" value="1" disabled> Также отдавать технические поля журнала</label><br><span class="description">IP-адрес, User-Agent, WordPress user_id и context. Включайте только если сервису они действительно нужны.</span></p>
+						<?php submit_button( 'Создать токен', 'secondary', 'submit', false ); ?>
+					</form>
+					<div data-f152-api-token-result hidden style="margin-top:16px;">
+						<p><strong>Скопируйте токен сейчас. Повторно показать его будет невозможно.</strong></p>
+						<pre class="f152-api-code"><code data-f152-api-token-value></code></pre>
+						<p><button type="button" class="button" data-f152-api-copy>Копировать</button></p>
+					</div>
+
+					<h3>Активные токены</h3>
+					<p class="description">Максимум токенов: <?php echo esc_html( (string) $max_tokens ); ?>. Секреты здесь не отображаются.</p>
+					<table class="widefat striped"><thead><tr><th>Название</th><th>Разрешения</th><th>Создан</th><th></th></tr></thead><tbody>
+					<?php if ( empty( $tokens ) ) : ?>
+						<tr><td colspan="4">Токенов пока нет.</td></tr>
+					<?php else : foreach ( $tokens as $token ) : ?>
+						<tr>
+							<td><?php echo esc_html( (string) $token['name'] ); ?><br><code><?php echo esc_html( substr( (string) $token['id'], 0, 8 ) ); ?>…</code></td>
+							<td><?php echo esc_html( implode( ', ', (array) $token['scopes'] ) ); ?></td>
+							<td><?php echo esc_html( (string) $token['created_at'] ); ?></td>
+							<td><button type="button" class="button button-link-delete" data-f152-api-revoke data-token-id="<?php echo esc_attr( (string) $token['id'] ); ?>">Отозвать</button></td>
+						</tr>
+					<?php endforeach; endif; ?>
+					</tbody></table>
+				</div>
+			</section>
+
+			<section class="f152-settings-card">
+				<div class="f152-settings-card__header"><div><span class="f152-card-eyebrow">REST read-only</span><h2>Удалённое чтение</h2></div></div>
+				<div class="f152-settings-card__body">
+					<p><strong>Статус:</strong> <code><?php echo esc_html( $status_url ); ?></code></p>
+					<p><strong>Журнал:</strong> <code><?php echo esc_html( $consents_url ); ?></code></p>
+					<pre class="f152-api-code"><code><?php echo esc_html("curl -H \"Authorization: Bearer YOUR_TOKEN\" \\\n  \"{$consents_url}?after_id=123&limit=50&order=asc\""); ?></code></pre>
+					<p>Если хостинг удаляет заголовок <code>Authorization</code>, используйте <code>X-F152-Token: YOUR_TOKEN</code>. Токены в URL намеренно не поддерживаются.</p>
+					<p><strong>Удалённый API работает только на HTTPS и только server-to-server.</strong> Запросы с браузерным заголовком <code>Origin</code> отклоняются. Не вызывайте эти endpoints из JavaScript.</p>
+					<p>Параметры списка: <code>limit</code> (1–100), <code>after_id</code>, <code>before_id</code>, <code>order=asc|desc</code>, <code>source_type</code>, <code>source_plugin</code>, <code>source_uid</code>, <code>created_after</code>, <code>created_before</code>.</p>
+					<p>Обычное разрешение чтения журнала возвращает ID, дату, источник, страницу/форму, email, имя, телефон, текст и версию согласия, URL политики, hash и нормализованные <code>consent_kind</code>/<code>decision</code>/<code>required</code>. Техническое разрешение дополнительно открывает <code>IP</code>, <code>User-Agent</code>, <code>user_id</code> и raw <code>context</code>.</p>
+					<p>Для синхронизации CRM удобно читать <code>order=asc</code> и передавать следующий <code>after_id</code> из ответа. Поле <code>has_more</code> показывает, есть ли следующая пачка. API не предоставляет удалённых методов POST/PUT/PATCH/DELETE.</p>
+					<p class="description">Ответы помечаются <code>no-store</code>. Смена WordPress salts в <code>wp-config.php</code> делает ранее созданные API-токены недействительными — после такой смены создайте новые токены.</p>
+				</div>
+			</section>
+		</div>
+		<?php
+	}
+
 	private static function is_pro_license_active() : bool {
 		if ( ! defined( 'F152_PRO_VERSION' ) ) {
 			return false;
@@ -1030,6 +1192,68 @@ final class Settings {
 		wp_send_json_success( is_array( $result ) ? $result : [] );
 	}
 
+	public static function handle_browser_scan_site(): void {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( [ 'message' => 'Недостаточно прав.' ], 403 );
+		}
+
+		check_ajax_referer( 'f152_browser_scan_site', 'nonce' );
+		$mode_raw = filter_input( INPUT_POST, 'mode', FILTER_UNSAFE_RAW );
+		$mode = is_string( $mode_raw ) ? sanitize_key( wp_unslash( $mode_raw ) ) : '';
+		if ( ! class_exists( '\F152\ServiceScanner' ) ) {
+			wp_send_json_error( [ 'message' => 'Сканер недоступен.' ], 500 );
+		}
+
+		if ( 'begin' === $mode ) {
+			if ( is_callable( [ '\\F152\\ServiceScanner', 'acquire_browser_scan_lock' ] ) && ! ServiceScanner::acquire_browser_scan_lock() ) {
+				wp_send_json_error( [ 'message' => 'Проверка сайта уже выполняется в другой вкладке или только что была запущена. Дождитесь её завершения.' ], 409 );
+			}
+			try {
+				ServiceScanner::begin_browser_scan();
+			} catch ( \Throwable $e ) {
+				if ( is_callable( [ '\\F152\\ServiceScanner', 'release_browser_scan_lock' ] ) ) ServiceScanner::release_browser_scan_lock();
+				throw $e;
+			}
+			wp_send_json_success( [ 'started' => true ] );
+		}
+
+		if ( 'page' === $mode ) {
+			if ( is_callable( [ '\\F152\\ServiceScanner', 'touch_browser_scan_lock' ] ) ) ServiceScanner::touch_browser_scan_lock();
+			$url_raw = filter_input( INPUT_POST, 'url', FILTER_UNSAFE_RAW );
+			$title_raw = filter_input( INPUT_POST, 'title', FILTER_UNSAFE_RAW );
+			$home_raw = filter_input( INPUT_POST, 'home', FILTER_UNSAFE_RAW );
+			$html_raw = filter_input( INPUT_POST, 'html', FILTER_UNSAFE_RAW );
+			$url = is_string( $url_raw ) ? esc_url_raw( wp_unslash( $url_raw ) ) : '';
+			$title = is_string( $title_raw ) ? sanitize_text_field( wp_unslash( $title_raw ) ) : '';
+			$home = is_string( $home_raw ) && '1' === sanitize_text_field( wp_unslash( $home_raw ) );
+			$html = is_string( $html_raw ) ? wp_unslash( $html_raw ) : '';
+			if ( '' === $url || '' === trim( $html ) || ! ServiceScanner::store_browser_page_html( $url, $title, $html, $home ) ) {
+				wp_send_json_error( [ 'message' => 'Не удалось сохранить результат страницы.' ], 400 );
+			}
+			wp_send_json_success( [ 'stored' => true ] );
+		}
+
+		if ( 'heartbeat' === $mode ) {
+			if ( is_callable( [ '\\F152\\ServiceScanner', 'touch_browser_scan_lock' ] ) ) ServiceScanner::touch_browser_scan_lock();
+			wp_send_json_success( [ 'alive' => true ] );
+		}
+
+		if ( 'finish' === $mode ) {
+			$failures_raw = filter_input( INPUT_POST, 'failures', FILTER_UNSAFE_RAW );
+			$failures_json = is_string( $failures_raw ) ? wp_unslash( $failures_raw ) : '[]';
+			$failures = json_decode( $failures_json, true );
+			$failures = is_array( $failures ) ? $failures : [];
+			try {
+				$result = ServiceScanner::finish_browser_scan( $failures );
+			} finally {
+				if ( is_callable( [ '\\F152\\ServiceScanner', 'release_browser_scan_lock' ] ) ) ServiceScanner::release_browser_scan_lock();
+			}
+			wp_send_json_success( $result );
+		}
+
+		wp_send_json_error( [ 'message' => 'Неизвестный режим проверки.' ], 400 );
+	}
+
 	public static function handle_rescan_site(): void {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_die( esc_html__( 'Недостаточно прав для выполнения этого действия.', 'fz-152-rf' ) );
@@ -1042,8 +1266,9 @@ final class Settings {
 
 		$url = add_query_arg(
 			[
-				'page' => 'f152',
-				'tab'  => 'main',
+				'page'            => 'f152',
+				'tab'             => 'main',
+				'f152_force_scan' => '1',
 			],
 			admin_url( 'options-general.php' )
 		);
@@ -1157,10 +1382,6 @@ final class Settings {
 	}
 
 	private static function render_tab_main() : void {
-		if ( class_exists( '\F152\ServiceScanner' ) && is_callable( [ '\F152\ServiceScanner', 'clear_server_cache' ] ) ) {
-			\F152\ServiceScanner::clear_server_cache();
-		}
-
 		$pro_active = self::is_pro_license_active();
 		$tracker_issues = class_exists( '\F152\ServiceScanner' )
 			? \F152\ServiceScanner::get_issues()
@@ -1173,7 +1394,9 @@ final class Settings {
 			: [];
 		$scan_home_ok = ! empty( $scan_meta['home_ok'] );
 		$scan_failed_pages = isset( $scan_meta['failed_pages'] ) ? max( 0, (int) $scan_meta['failed_pages'] ) : 0;
-		$scan_incomplete = ! $scan_home_ok || $scan_failed_pages > 0;
+		$scan_pending = ! empty( $scan_meta['browser_pending'] );
+		$scan_complete = ! empty( $scan_meta['browser_complete'] );
+		$scan_incomplete = ! $scan_pending && ( ! $scan_home_ok || $scan_failed_pages > 0 );
 		$detected_frontend_labels = [];
 		$scan_services = isset( $scan_snapshot['services'] ) && is_array( $scan_snapshot['services'] ) ? $scan_snapshot['services'] : [];
 		foreach ( $scan_services as $service_id => $detection ) {
@@ -1238,7 +1461,7 @@ final class Settings {
 					<div>
 						<span class="f152-card-eyebrow">Диагностика</span>
 						<h3 id="f152-audit-title">Проверка сайта</h3>
-						<p>Для первичной проверки сайта вам больше не нужны отдельные онлайн-сервисы: FZ-152 сам проверит главную и опубликованные страницы, найдёт известные формы, трекеры и внешние сервисы и подскажет, что нужно проверить или изменить. Сканирование запускается автоматически при открытии этой вкладки. Записи блога и товары не сканируются; браузер дополнительно перепроверяет главную страницу.</p>
+						<p>Записи блога и товары не сканируются.</p>
 					</div>
 					<?php if ( $audit_count > 0 ) : ?><span class="f152-audit-card__count f152-audit-card__count--attention"><?php echo esc_html( sprintf( 'Нужно проверить: %d', $audit_count ) ); ?></span><?php else : ?><span class="f152-audit-card__count">Проблем не найдено</span><?php endif; ?>
 				</div>
@@ -1247,13 +1470,13 @@ final class Settings {
 					<div class="f152-audit-item" data-f152-browser-scan>
 						<div class="f152-audit-item__icon"><span class="dashicons dashicons-search" aria-hidden="true"></span></div>
 						<div class="f152-audit-item__body">
-							<div class="f152-audit-item__title"><strong>Результат проверки сайта</strong><span class="f152-status-chip f152-status-chip--scanning" data-f152-browser-scan-chip aria-live="polite"><span class="f152-status-chip__spinner" aria-hidden="true"></span><span data-f152-browser-scan-chip-text>Сканирование…</span></span></div>
+							<div class="f152-audit-item__title"><strong>Результат проверки сайта</strong><span class="f152-status-chip <?php echo esc_attr( $scan_complete ? 'f152-status-chip--success' : 'f152-status-chip--scanning' ); ?>" data-f152-browser-scan-chip aria-live="polite"><span class="f152-status-chip__spinner" aria-hidden="true"></span><span data-f152-browser-scan-chip-text><?php echo esc_html( $scan_complete ? 'Готово' : 'Сканирование…' ); ?></span></span></div>
 							<?php if ( ! empty( $detected_frontend_labels ) ) : ?>
 								<p><strong>Найдены сервисы:</strong> <?php echo esc_html( implode( ', ', $detected_frontend_labels ) ); ?>.</p>
 							<?php else : ?>
-								<p>На проверенных страницах известные внешние сервисы пока не найдены. Браузер дополнительно перепроверит главную страницу.</p>
+								<p>На проверенных страницах известные внешние сервисы пока не найдены. Браузер проверит главную и опубликованные страницы.</p>
 							<?php endif; ?>
-							<p class="f152-audit-item__meta" data-f152-browser-scan-status aria-live="polite">Сканирование ещё выполняется. Результат обновится автоматически.</p>
+							<p class="f152-audit-item__meta" data-f152-browser-scan-status aria-live="polite"><?php echo esc_html( $scan_complete ? sprintf( 'Проверено страниц: %d. Ошибок загрузки: %d.', (int) ( $scan_meta['rendered_pages'] ?? 0 ), $scan_failed_pages ) : 'Сканирование ещё выполняется. Результат обновится автоматически.' ); ?></p>
 							<?php $rescan_url = wp_nonce_url( admin_url( 'admin-post.php?action=f152_rescan_site' ), 'f152_rescan_site' ); ?>
 							<p><a class="button button-secondary" href="<?php echo esc_url( $rescan_url ); ?>">Проверить сайт сейчас</a></p>
 						</div>
@@ -1269,13 +1492,13 @@ final class Settings {
 							<div class="f152-audit-item__body">
 								<div class="f152-audit-item__title"><strong>Не получилось проверить все страницы</strong><span class="f152-status-chip f152-status-chip--attention">Повторите проверку</span></div>
 								<?php if ( ! $scan_home_ok && $scan_failed_pages > 0 ) : ?>
-									<p><?php echo esc_html( sprintf( 'FZ-152 не смог автоматически открыть главную страницу и ещё %d страниц. Сам сайт при этом может работать нормально: иногда хостинг или защита сайта блокирует запрос, который WordPress делает сам к себе.', $scan_failed_pages ) ); ?></p>
+									<p><?php echo esc_html( sprintf( 'Браузер администратора не смог открыть главную страницу и ещё %d страниц во время проверки.', $scan_failed_pages ) ); ?></p>
 								<?php elseif ( ! $scan_home_ok ) : ?>
-									<p>FZ-152 не смог автоматически открыть главную страницу. Сам сайт при этом может работать нормально: иногда хостинг или защита сайта блокирует запрос, который WordPress делает сам к себе.</p>
+									<p>Браузер администратора не смог открыть главную страницу во время проверки.</p>
 								<?php else : ?>
-									<p><?php echo esc_html( sprintf( 'FZ-152 не смог автоматически открыть %d страниц. Остальные найденные проблемы ниже можно исправлять — они не зависят от этого сообщения.', $scan_failed_pages ) ); ?></p>
+									<p><?php echo esc_html( sprintf( 'Браузер администратора не смог открыть %d страниц. Остальные найденные проблемы ниже можно исправлять — они не зависят от этого сообщения.', $scan_failed_pages ) ); ?></p>
 								<?php endif; ?>
-								<p><strong>Что делать:</strong> нажмите «Проверить ещё раз». Если сообщение останется — ничего на сервере самостоятельно настраивать не нужно, просто пришлите это сообщение в поддержку FZ-152.</p>
+								<p><strong>Что делать:</strong> нажмите «Проверить ещё раз». Если сообщение останется, откройте «Данные для поддержки» и пришлите их в поддержку FZ-152.</p>
 								<?php $rescan_url = wp_nonce_url( admin_url( 'admin-post.php?action=f152_rescan_site' ), 'f152_rescan_site' ); ?>
 								<p><a class="button button-secondary" href="<?php echo esc_url( $rescan_url ); ?>">Проверить ещё раз</a></p>
 								<?php if ( ! empty( $home_error ) || ! empty( $failed_page_details ) ) : ?>
@@ -1311,7 +1534,7 @@ final class Settings {
 							<div class="f152-audit-item__icon"><span class="dashicons dashicons-forms" aria-hidden="true"></span></div>
 							<div class="f152-audit-item__body">
 								<div class="f152-audit-item__title"><strong><?php echo esc_html( $detected_plugin['name'] ); ?></strong><span class="f152-status-chip f152-status-chip--attention">Нужно настроить</span></div>
-								<p>На сайте есть эта форма, но бесплатный FZ-152 не умеет автоматически добавлять в неё согласие и записывать его в журнал. Если посетители отправляют через форму имя, телефон, email или другие данные — добавьте чекбокс согласия вручную. Возможности автоматической интеграции собраны в одном блоке Pro ниже.</p>
+								<p>На сайте есть эта форма, но бесплатный FZ-152 не умеет автоматически добавлять в неё согласие и записывать его в журнал. Если посетители отправляют через форму имя, телефон, email или другие данные — добавьте чекбокс согласия вручную. У Pro версии есть полная интеграция с этим плагином.</p>
 							</div>
 						</div>
 					<?php endforeach; ?>
@@ -1372,7 +1595,7 @@ final class Settings {
 						<strong>FZ-152 RF Pro может исправить это автоматически</strong>
 						<p>Интеграции с другими плагинами, управление трекерами и внешними сервисами, автоматическое добавление недостающих текстов в политики — всё это Pro-версия плагина может настроить и дальше поддерживать автоматически за вас.</p>
 					</div>
-					<a class="button button-primary" href="https://kotikblog.ru/product/fz-152-rf-pro/?utm_source=free_plugin&amp;utm_medium=audit_summary&amp;utm_campaign=pro_upgrade" target="_blank" rel="noopener noreferrer">Подробнее о FZ-152 Pro</a>
+					<a class="button button-primary" href="<?php echo esc_url( add_query_arg( [ 'utm_source' => 'free_plugin', 'utm_medium' => 'audit_summary', 'utm_campaign' => 'pro_upgrade', 'utm_content' => 'diagnostics_bottom_cta' ], F152_PURCHASE_URL ) ); ?>" target="_blank" rel="noopener noreferrer">Подробнее о FZ-152 Pro</a>
 				</div>
 				<?php endif; ?>
 			</section>
@@ -1404,7 +1627,7 @@ final class Settings {
 						<div class="f152-field"><label for="f152_link_consent_pd">Согласие на обработку ПД (URL)</label><input type="url" class="regular-text" id="f152_link_consent_pd" name="f152_link_consent_pd" value="<?php echo esc_attr( get_option('f152_link_consent_pd', '') ); ?>"></div>
 						<div class="f152-field"><label for="f152_link_policy_cookie">Политика использования cookie (URL)</label><input type="url" class="regular-text" id="f152_link_policy_cookie" name="f152_link_policy_cookie" value="<?php echo esc_attr( get_option('f152_link_policy_cookie', '') ); ?>"></div>
 						<div class="f152-field"><label for="f152_link_consent_marketing">Согласие на рассылку (URL)</label><input type="url" class="regular-text" id="f152_link_consent_marketing" name="f152_link_consent_marketing" value="<?php echo esc_attr( get_option('f152_link_consent_marketing', '') ); ?>"></div>
-						<div class="f152-field"><label for="f152_policy_version">Версия политики персональных данных</label><input type="text" class="regular-text" id="f152_policy_version" name="f152_policy_version" value="<?php echo esc_attr( get_option('f152_policy_version', '') ); ?>" placeholder="1.0"><small>Версия сохраняется в журнале. После её изменения ранее сохранённый выбор cookie считается устаревшим и баннер показывается снова. При наличии кэша/CDN очистите его.</small></div>
+						<div class="f152-field"><label for="f152_policy_version">Версия политики персональных данных</label><input type="text" class="regular-text" id="f152_policy_version" name="f152_policy_version" value="<?php echo esc_attr( API::get_policy_version() ); ?>" placeholder="1.0"><small>Версия сохраняется в журнале. После её изменения ранее сохранённый выбор cookie считается устаревшим и баннер показывается снова. При наличии кэша/CDN очистите его.</small></div>
 						<div class="f152-field f152-field--full f152-create-pages-field"><label>Действия со страницами</label><?php self::render_create_pages_button(); ?></div>
 					</div>
 				</div>
@@ -1579,7 +1802,7 @@ final class Settings {
 
 		$sub_raw = filter_input( INPUT_GET, 'subtab', FILTER_UNSAFE_RAW );
 		$subtab  = is_string( $sub_raw ) ? sanitize_key( wp_unslash( $sub_raw ) ) : 'policy_pd';
-		if ( ! isset( $map[ $subtab ] ) ) {
+		if ( ! isset( $map[ $subtab ] ) && 'history' !== $subtab ) {
 			$subtab = 'policy_pd';
 		}
 
@@ -1588,7 +1811,9 @@ final class Settings {
 			<?php foreach ( $map as $key => $info ) : ?>
 				<a href="<?php echo esc_url( self::subtab_url($key) ); ?>" class="nav-tab <?php echo esc_attr( $subtab === $key ? 'nav-tab-active' : '' ); ?>"><?php echo esc_html( $info['label'] ); ?></a>
 			<?php endforeach; ?>
+			<a href="<?php echo esc_url( self::subtab_url('history') ); ?>" class="nav-tab <?php echo esc_attr( 'history' === $subtab ? 'nav-tab-active' : '' ); ?>">История версий</a>
 		</h2>
+		<?php if ( 'history' === $subtab ) { self::render_policy_history(); return; } ?>
 		<?php self::render_replace_configured_pages_button( false, 'texts' ); ?>
 		<?php
 
@@ -1600,6 +1825,79 @@ final class Settings {
 		}
 
 		self::render_text_block( $subtab, $map );
+	}
+
+
+	private static function render_policy_history(): void {
+		if ( class_exists( '\F152\PolicySnapshots' ) ) {
+			PolicySnapshots::maybe_upgrade();
+		}
+		$snapshots = class_exists( '\F152\PolicySnapshots' ) ? PolicySnapshots::get_snapshots( 120 ) : [];
+		$labels = [
+			'policy_pd' => 'Политика обработки ПД',
+			'consent_pd' => 'Согласие на обработку ПД',
+			'policy_cookie' => 'Политика cookie',
+			'consent_marketing' => 'Согласие на рассылку',
+		];
+		$sources = [
+			'baseline' => 'Исходный снимок',
+			'before_change' => 'Перед изменением страницы',
+			'version_mark' => 'Версия политики',
+			'manual' => 'Ручной снимок',
+		];
+		$saved_raw = filter_input( INPUT_GET, 'f152_snapshot_saved', FILTER_UNSAFE_RAW );
+		$saved = is_string( $saved_raw ) ? max( 0, (int) sanitize_text_field( wp_unslash( $saved_raw ) ) ) : -1;
+		?>
+		<div class="f152-settings-card">
+			<div class="f152-settings-card__header">
+				<div>
+					<span class="f152-card-eyebrow">Архив документов</span>
+					<h2>История версий юридических страниц</h2>
+					<p>FZ-152 хранит собственные снимки страниц и не зависит от WordPress Revisions. Снимок создаётся перед изменением отслеживаемой страницы и при смене версии политики.</p>
+				</div>
+			</div>
+			<div class="f152-settings-card__body">
+				<?php if ( $saved >= 0 ) : ?>
+					<div class="notice notice-success inline"><p><?php echo esc_html( $saved > 0 ? sprintf( 'Сохранено снимков: %d.', $saved ) : 'Новых снимков не потребовалось: текущие тексты уже сохранены.' ); ?></p></div>
+				<?php endif; ?>
+				<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+					<input type="hidden" name="action" value="f152_capture_policy_snapshot">
+					<?php wp_nonce_field( 'f152_capture_policy_snapshot', 'f152_snapshot_nonce' ); ?>
+					<?php submit_button( 'Сохранить снимок текущих страниц', 'secondary', 'submit', false ); ?>
+				</form>
+				<p class="description">Снимки создаются только для страниц WordPress, ссылки на которые указаны в FZ-152 или которые были созданы самим плагином.</p>
+			</div>
+		</div>
+		<?php if ( empty( $snapshots ) ) : ?>
+			<p>Снимков пока нет.</p>
+		<?php else : ?>
+			<div class="f152-policy-history">
+				<?php foreach ( $snapshots as $index => $snapshot ) : ?>
+					<?php
+					$document = sanitize_key( (string) ( $snapshot['document'] ?? '' ) );
+					$source = sanitize_key( (string) ( $snapshot['source'] ?? '' ) );
+					$textarea_id = 'f152-policy-snapshot-' . (int) ( $snapshot['id'] ?? $index );
+					?>
+					<details class="f152-settings-card" style="margin-top:12px;">
+						<summary style="cursor:pointer;padding:16px 20px;">
+							<strong><?php echo esc_html( $labels[ $document ] ?? $document ); ?></strong>
+							 — <?php echo esc_html( (string) ( $snapshot['created_at'] ?? '' ) ); ?>
+							<?php if ( ! empty( $snapshot['policy_version'] ) ) : ?> — версия <?php echo esc_html( (string) $snapshot['policy_version'] ); ?><?php endif; ?>
+							 — <?php echo esc_html( $sources[ $source ] ?? $source ); ?>
+						</summary>
+						<div style="padding:0 20px 20px;">
+							<p class="description"><?php echo esc_html( (string) ( $snapshot['page_title'] ?? '' ) ); ?><?php if ( ! empty( $snapshot['page_id'] ) ) : ?> · ID <?php echo (int) $snapshot['page_id']; ?><?php endif; ?></p>
+							<div class="f152-row-actions">
+								<button type="button" class="button f152-copy-btn" data-f152-copy-target="<?php echo esc_attr( $textarea_id ); ?>" data-f152-copy-status="<?php echo esc_attr( $textarea_id . '-status' ); ?>" data-f152-copy-success="Скопировано" data-f152-copy-error="Не удалось скопировать">Скопировать</button>
+								<span id="<?php echo esc_attr( $textarea_id . '-status' ); ?>" class="f152-copy-status" aria-live="polite"></span>
+							</div>
+							<textarea id="<?php echo esc_attr( $textarea_id ); ?>" class="large-text code" rows="14" readonly><?php echo esc_textarea( (string) ( $snapshot['content'] ?? '' ) ); ?></textarea>
+						</div>
+					</details>
+				<?php endforeach; ?>
+			</div>
+		<?php endif; ?>
+		<?php
 	}
 
 
@@ -1755,7 +2053,7 @@ final class Settings {
 					<?php endforeach; ?>
 				</div>
 				<p class="f152-policy-pro-preview__note"><?php echo esc_html__( 'Это только предпросмотр: бесплатная версия ничего не меняет автоматически.', 'fz-152-rf' ); ?></p>
-				<p><a class="button button-primary" href="https://kotikblog.ru/product/fz-152-rf-pro/?utm_source=free_plugin&amp;utm_medium=texts_policy_preview&amp;utm_campaign=pro_upgrade" target="_blank" rel="noopener noreferrer"><?php echo esc_html__( 'Подробнее о FZ-152 Pro', 'fz-152-rf' ); ?></a></p>
+				<p><a class="button button-primary" href="<?php echo esc_url( add_query_arg( [ 'utm_source' => 'free_plugin', 'utm_medium' => 'texts_policy_preview', 'utm_campaign' => 'pro_upgrade', 'utm_content' => 'policy_preview_cta' ], F152_PURCHASE_URL ) ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html__( 'Подробнее о FZ-152 Pro', 'fz-152-rf' ); ?></a></p>
 			</div>
 		</section>
 		<?php endif; ?>
@@ -1838,6 +2136,33 @@ final class Settings {
 			echo '<p><em>Класс Templates не найден. Проверьте подключение includes/class-templates.php</em></p>';
 		}
 	}
+	private static function render_locked_rkn_tab() : void {
+		$buy_url = apply_filters( 'f152_pro_buy_url', add_query_arg( [ 'utm_source' => 'free_plugin', 'utm_medium' => 'rkn_tab', 'utm_campaign' => 'pro_upgrade', 'utm_content' => 'rkn_locked_cta' ], F152_PURCHASE_URL ) );
+		?>
+		<div class="f152-integrations-locked">
+			<div class="f152-addon-intro">
+				<span class="f152-card-eyebrow">FZ-152 RF Pro</span>
+				<h2>Подготовка уведомления в Роскомнадзор</h2>
+				<p>Pro помогает собрать сведения об операторе и целях обработки, подготовить черновик уведомления по форме Роскомнадзора, проверить трансграничную передачу и запомнить состояние после подачи, чтобы позже видеть изменения.</p>
+			</div>
+			<section class="f152-addon-section" aria-labelledby="f152-rkn-pro-title">
+				<div class="f152-addon-section__header">
+					<h2 id="f152-rkn-pro-title">Что доступно в Pro</h2>
+					<p>Это отдельный помощник внутри FZ-152, а не просто пустой шаблон документа.</p>
+				</div>
+				<div class="f152-integrations-grid">
+					<div class="f152-integrations-card f152-integrations-card--locked"><div class="f152-integrations-card__lock"><span class="dashicons dashicons-lock" aria-hidden="true"></span></div><div class="f152-integrations-card__body"><h3 class="f152-integrations-card__title">Мастер оператора</h3><p class="f152-integrations-card__desc">Реквизиты, ответственный, базы данных, сроки, меры защиты и анкета о процессах вне WordPress.</p></div></div>
+					<div class="f152-integrations-card f152-integrations-card--locked"><div class="f152-integrations-card__lock"><span class="dashicons dashicons-lock" aria-hidden="true"></span></div><div class="f152-integrations-card__body"><h3 class="f152-integrations-card__title">Цели обработки</h3><p class="f152-integrations-card__desc">Готовые редактируемые цели для заявок, заказов, личных кабинетов, рассылок, аналитики, CRM, сотрудников и других сценариев.</p></div></div>
+					<div class="f152-integrations-card f152-integrations-card--locked"><div class="f152-integrations-card__lock"><span class="dashicons dashicons-lock" aria-hidden="true"></span></div><div class="f152-integrations-card__body"><h3 class="f152-integrations-card__title">Черновик и инструкция</h3><p class="f152-integrations-card__desc">Поля в порядке формы Роскомнадзора, кнопки копирования, TXT-выгрузка и печать/сохранение в PDF.</p></div></div>
+					<div class="f152-integrations-card f152-integrations-card--locked"><div class="f152-integrations-card__lock"><span class="dashicons dashicons-lock" aria-hidden="true"></span></div><div class="f152-integrations-card__body"><h3 class="f152-integrations-card__title">Контроль изменений</h3><p class="f152-integrations-card__desc">После подачи можно зафиксировать заявленное состояние и видеть, что изменилось в целях, настройках и обнаруженных сервисах.</p></div></div>
+					<div class="f152-integrations-card f152-integrations-card--locked"><div class="f152-integrations-card__lock"><span class="dashicons dashicons-lock" aria-hidden="true"></span></div><div class="f152-integrations-card__body"><h3 class="f152-integrations-card__title">Трансграничная передача</h3><p class="f152-integrations-card__desc">Отдельная проверка сервисов-кандидатов и ссылка на специальную форму уведомления РКН.</p></div></div>
+				</div>
+			</section>
+			<div class="f152-integrations-locked__cta"><a class="button button-primary" href="<?php echo esc_url( $buy_url ); ?>" target="_blank" rel="noopener noreferrer">Подробнее о FZ-152 RF Pro</a></div>
+		</div>
+		<?php
+	}
+
 	private static function render_locked_integrations_tab() : void {
 		$form_cards = [
 			[ 'title' => 'Contact Form 7',        'desc' => 'Автоматический чекбокс согласия и логирование отправленных форм.' ],
@@ -1846,6 +2171,9 @@ final class Settings {
 			[ 'title' => 'Fluent Forms',          'desc' => 'Автоматический чекбокс согласия и логирование отправок.' ],
 			[ 'title' => 'Forminator',            'desc' => 'Автоматический чекбокс согласия и логирование отправок.' ],
 			[ 'title' => 'MetForm',               'desc' => 'Автоматический чекбокс согласия и логирование отправок.' ],
+			[ 'title' => 'FormLayer',            'desc' => 'Автоматический чекбокс, положение над/под кнопкой, серверная проверка и журнал имени, телефона и email.' ],
+			[ 'title' => 'Formidable Forms',      'desc' => 'Автоматический чекбокс, положение над/под кнопкой, серверная проверка и журнал имени, телефона и email.' ],
+			[ 'title' => 'SureForms',             'desc' => 'Автоматический чекбокс, положение над/под кнопкой, серверная проверка и журнал имени, телефона и email.' ],
 			[ 'title' => 'Gravity Forms',         'desc' => 'Автоматический чекбокс согласия, серверная проверка и логирование отправок.' ],
 			[ 'title' => 'wpDiscuz',              'desc' => 'Чекбокс согласия в комментариях wpDiscuz с логированием.' ],
 			[ 'title' => 'Elementor Pro Forms',   'desc' => 'Поле согласия в Legacy-формах Elementor Pro.' ],
@@ -1878,7 +2206,7 @@ final class Settings {
 			[ 'title' => 'Roistat, VK Реклама, 2ГИС и другие', 'desc' => 'Автоматическое добавление и дальнейшее обновление юридических описаний поддерживаемых внешних сервисов.' ],
 		];
 
-		$buy_url = apply_filters( 'f152_pro_buy_url', 'https://kotikblog.ru/product/fz-152-rf-pro/' );
+		$buy_url = apply_filters( 'f152_pro_buy_url', add_query_arg( [ 'utm_source' => 'free_plugin', 'utm_medium' => 'addon_tab', 'utm_campaign' => 'pro_upgrade', 'utm_content' => 'integrations_locked' ], F152_PURCHASE_URL ) );
 		?>
 		<div class="f152-integrations-locked">
 			<div class="f152-addon-intro">
@@ -1957,7 +2285,7 @@ final class Settings {
 	private static function render_multisite_discount_card() : void {
 		$buy_url = apply_filters(
 			'f152_pro_buy_url',
-			'https://kotikblog.ru/product/fz-152-rf-pro/?utm_source=free_plugin&utm_medium=addon_tab&utm_campaign=owner_multisite_discount'
+			add_query_arg( [ 'utm_source' => 'free_plugin', 'utm_medium' => 'addon_tab', 'utm_campaign' => 'owner_multisite_discount', 'utm_content' => 'multisite_discount_card' ], F152_PURCHASE_URL )
 		);
 		?>
 		<section class="f152-partner-card f152-multisite-discount-card" aria-labelledby="f152-multisite-discount-title">
@@ -1978,7 +2306,7 @@ final class Settings {
 	private static function render_partner_program_card() : void {
 		$partner_url = apply_filters(
 			'f152_partner_program_url',
-			'https://kotikblog.ru/fz152-partner/?utm_source=free_plugin&utm_medium=addon_tab&utm_campaign=partner_program'
+			add_query_arg( [ 'utm_source' => 'free_plugin', 'utm_medium' => 'addon_tab', 'utm_campaign' => 'partner_program', 'utm_content' => 'partner_program_card' ], F152_PARTNER_URL )
 		);
 		?>
 		<section class="f152-partner-card" aria-labelledby="f152-partner-title">
@@ -2139,6 +2467,9 @@ final class Settings {
   public static function register_csv_export_handler(): void {
   	add_action('admin_action_f152_export_csv', [__CLASS__, 'handle_csv_export']);
   	add_action('admin_action_f152_clear_logs', [__CLASS__, 'handle_clear_logs']);
+	add_action('admin_post_f152_clear_logs', [__CLASS__, 'handle_clear_logs']);
+	add_action('admin_post_f152_log_cleanup_password', [__CLASS__, 'handle_log_cleanup_password']);
+	add_action('admin_post_f152_capture_policy_snapshot', [__CLASS__, 'handle_capture_policy_snapshot']);
   	add_action('admin_action_f152_create_pages', [__CLASS__, 'handle_create_pages']);
   	add_action('admin_post_f152_replace_configured_pages', [__CLASS__, 'handle_replace_configured_pages']);
   	add_action('admin_action_f152_clear_banner_stats', [__CLASS__, 'handle_clear_banner_stats']);
@@ -2382,24 +2713,78 @@ final class Settings {
  		wp_die('Недостаточно прав для выполнения операции.');
  	}
 
- 	$nonce_raw = filter_input(INPUT_GET, 'f152_clear_nonce', FILTER_UNSAFE_RAW);
- 	$nonce = is_string($nonce_raw) ? sanitize_text_field(wp_unslash($nonce_raw)) : '';
+ 	check_admin_referer( 'f152_clear_logs', 'f152_clear_nonce' );
+ 	$date_raw = filter_input( INPUT_POST, 'f152_clear_until', FILTER_UNSAFE_RAW );
+ 	$password_raw = filter_input( INPUT_POST, 'f152_clear_password', FILTER_UNSAFE_RAW );
+ 	$date = is_string( $date_raw ) ? sanitize_text_field( wp_unslash( $date_raw ) ) : '';
+ 	$password = is_string( $password_raw ) ? wp_unslash( $password_raw ) : '';
+ 	$hash = (string) get_option( 'f152_log_cleanup_password_hash', '' );
 
- 	if ( ! wp_verify_nonce($nonce, 'f152_clear_logs') ) {
- 		wp_die('Ошибка проверки безопасности. Попробуйте ещё раз.');
+ 	if ( '' === $hash || '' === $password || ! wp_check_password( $password, $hash ) ) {
+ 		wp_safe_redirect( add_query_arg( [ 'page' => 'f152', 'tab' => 'logs', 'f152_log_error' => 'password' ], admin_url( 'options-general.php' ) ) );
+ 		exit;
  	}
 
- 	if ( class_exists('\\F152\\ConsentLog') ) {
- 		\F152\ConsentLog::truncate_table();
+ 	$deleted = class_exists( '\F152\ConsentLog' ) ? \F152\ConsentLog::delete_through_date( $date ) : false;
+ 	if ( false === $deleted ) {
+ 		wp_safe_redirect( add_query_arg( [ 'page' => 'f152', 'tab' => 'logs', 'f152_log_error' => 'date' ], admin_url( 'options-general.php' ) ) );
+ 		exit;
  	}
 
- 	wp_safe_redirect(add_query_arg([
+ 	wp_safe_redirect( add_query_arg( [
  		'page' => 'f152',
  		'tab' => 'logs',
- 		'f152_cleared' => '1',
- 	], admin_url('options-general.php')));
+ 		'f152_cleared_count' => (int) $deleted,
+ 		'f152_cleared_date' => $date,
+ 	], admin_url( 'options-general.php' ) ) );
  	exit;
  }
+
+ public static function handle_log_cleanup_password(): void {
+ 	if ( ! current_user_can( 'manage_options' ) ) {
+ 		wp_die( 'Недостаточно прав для выполнения операции.' );
+ 	}
+
+ 	check_admin_referer( 'f152_log_cleanup_password', 'f152_log_password_nonce' );
+ 	$current_raw = filter_input( INPUT_POST, 'f152_current_cleanup_password', FILTER_UNSAFE_RAW );
+ 	$new_raw = filter_input( INPUT_POST, 'f152_new_cleanup_password', FILTER_UNSAFE_RAW );
+ 	$confirm_raw = filter_input( INPUT_POST, 'f152_confirm_cleanup_password', FILTER_UNSAFE_RAW );
+ 	$current = is_string( $current_raw ) ? wp_unslash( $current_raw ) : '';
+ 	$new = is_string( $new_raw ) ? wp_unslash( $new_raw ) : '';
+ 	$confirm = is_string( $confirm_raw ) ? wp_unslash( $confirm_raw ) : '';
+ 	$existing = (string) get_option( 'f152_log_cleanup_password_hash', '' );
+ 	$status = 'updated';
+
+ 	if ( '' !== $existing && ( '' === $current || ! wp_check_password( $current, $existing ) ) ) {
+ 		$status = 'current';
+ 	} elseif ( strlen( $new ) < 8 ) {
+ 		$status = 'short';
+ 	} elseif ( ! hash_equals( $new, $confirm ) ) {
+ 		$status = 'confirm';
+ 	} else {
+ 		update_option( 'f152_log_cleanup_password_hash', wp_hash_password( $new ), false );
+ 	}
+
+ 	wp_safe_redirect( add_query_arg( [ 'page' => 'f152', 'tab' => 'logs', 'f152_log_password' => $status ], admin_url( 'options-general.php' ) ) );
+ 	exit;
+ }
+
+ public static function handle_capture_policy_snapshot(): void {
+ 	if ( ! current_user_can( 'manage_options' ) ) {
+ 		wp_die( 'Недостаточно прав для выполнения операции.' );
+ 	}
+
+ 	check_admin_referer( 'f152_capture_policy_snapshot', 'f152_snapshot_nonce' );
+ 	$count = class_exists( '\F152\PolicySnapshots' ) ? PolicySnapshots::capture_current_all( 'manual' ) : 0;
+ 	wp_safe_redirect( add_query_arg( [
+ 		'page' => 'f152',
+ 		'tab' => 'texts',
+ 		'subtab' => 'history',
+ 		'f152_snapshot_saved' => (int) $count,
+ 	], admin_url( 'options-general.php' ) ) );
+ 	exit;
+ }
+
 
  	public static function handle_replace_configured_pages(): void {
  		if ( ! current_user_can( 'edit_pages' ) ) {
@@ -3176,6 +3561,9 @@ final class Settings {
  	'ninja_forms'       => 'Ninja Forms',
  	'ninja-forms'       => 'Ninja Forms',
  	'gravity_forms'     => 'Gravity Forms',
+ 	'sureforms'         => 'SureForms',
+	'formidable'        => 'Formidable Forms',
+	'formlayer'         => 'FormLayer',
  	'gravity-forms'     => 'Gravity Forms',
  	'universal_form'    => 'Универсальная форма',
  	'universal'         => 'Универсальная форма',
@@ -3189,10 +3577,7 @@ final class Settings {
  			'f152_export_nonce' => wp_create_nonce('f152_export_csv'),
  		], admin_url('admin.php'));
 
- 	$clear_url = add_query_arg([
- 			'action' => 'f152_clear_logs',
- 			'f152_clear_nonce' => wp_create_nonce('f152_clear_logs'),
- 		], admin_url('admin.php'));
+ 	$cleanup_hash = (string) get_option( 'f152_log_cleanup_password_hash', '' );
  	?>
  	<div class="f152-logs-wrap">
  		<h2>Журнал согласий</h2>
@@ -3207,18 +3592,60 @@ final class Settings {
  			</div>
  		<?php else : ?>
  			<?php
- 			$cleared_raw = filter_input(INPUT_GET, 'f152_cleared', FILTER_UNSAFE_RAW);
- 			$cleared = is_string($cleared_raw) ? sanitize_text_field(wp_unslash($cleared_raw)) : '';
- 			if ( $cleared === '1' ) : ?>
- 				<div class="notice notice-success is-dismissible">
- 					<p>Журнал согласий успешно очищен.</p>
- 				</div>
+ 			$cleared_count_raw = filter_input( INPUT_GET, 'f152_cleared_count', FILTER_UNSAFE_RAW );
+ 			$cleared_date_raw = filter_input( INPUT_GET, 'f152_cleared_date', FILTER_UNSAFE_RAW );
+ 			$log_error_raw = filter_input( INPUT_GET, 'f152_log_error', FILTER_UNSAFE_RAW );
+ 			$password_status_raw = filter_input( INPUT_GET, 'f152_log_password', FILTER_UNSAFE_RAW );
+ 			$cleared_count = is_string( $cleared_count_raw ) ? max( 0, (int) sanitize_text_field( wp_unslash( $cleared_count_raw ) ) ) : -1;
+ 			$cleared_date = is_string( $cleared_date_raw ) ? sanitize_text_field( wp_unslash( $cleared_date_raw ) ) : '';
+ 			$log_error = is_string( $log_error_raw ) ? sanitize_key( wp_unslash( $log_error_raw ) ) : '';
+ 			$password_status = is_string( $password_status_raw ) ? sanitize_key( wp_unslash( $password_status_raw ) ) : '';
+ 			if ( $cleared_count >= 0 ) : ?>
+ 				<div class="notice notice-success is-dismissible"><p><?php echo esc_html( sprintf( 'Удалено записей по %s включительно: %d.', $cleared_date, $cleared_count ) ); ?></p></div>
+ 			<?php elseif ( 'password' === $log_error ) : ?>
+ 				<div class="notice notice-error is-dismissible"><p>Неверный пароль защиты очистки журнала.</p></div>
+ 			<?php elseif ( 'date' === $log_error ) : ?>
+ 				<div class="notice notice-error is-dismissible"><p>Не удалось удалить записи. Проверьте дату.</p></div>
+ 			<?php endif; ?>
+ 			<?php if ( 'updated' === $password_status ) : ?>
+ 				<div class="notice notice-success is-dismissible"><p>Пароль защиты очистки журнала сохранён.</p></div>
+ 			<?php elseif ( in_array( $password_status, [ 'current', 'short', 'confirm' ], true ) ) : ?>
+ 				<div class="notice notice-error is-dismissible"><p><?php echo esc_html( 'current' === $password_status ? 'Текущий пароль указан неверно.' : ( 'short' === $password_status ? 'Новый пароль должен содержать не менее 8 символов.' : 'Новый пароль и подтверждение не совпадают.' ) ); ?></p></div>
  			<?php endif; ?>
 
  			<div class="f152-log-actions">
  				<a href="<?php echo esc_url($export_url); ?>" class="button f152-log-actions__export">Экспорт в CSV</a>
- 				<a href="<?php echo esc_url($clear_url); ?>" class="button f152-log-actions__clear" onclick="return confirm('Вы уверены, что хотите очистить журнал согласий? Это действие необратимо.');">Очистить журнал</a>
  			</div>
+
+			<details class="f152-settings-card" style="margin:16px 0;">
+				<summary style="cursor:pointer;padding:16px 20px;"><strong>Защищённая очистка журнала</strong></summary>
+				<div style="padding:0 20px 20px;">
+					<p>Очистка больше не удаляет весь журнал одной кнопкой. Укажите дату, и будут удалены только записи до этой даты включительно.</p>
+					<?php if ( '' === $cleanup_hash ) : ?>
+						<p><strong>Сначала задайте отдельный пароль очистки.</strong> Он не совпадает с паролем WordPress и хранится только в виде хэша.</p>
+					<?php else : ?>
+						<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" onsubmit="return confirm('Удалить записи журнала до выбранной даты включительно? Это действие необратимо.');" style="margin-bottom:20px;">
+							<input type="hidden" name="action" value="f152_clear_logs">
+							<?php wp_nonce_field( 'f152_clear_logs', 'f152_clear_nonce' ); ?>
+							<p><label><strong>Удалить записи по дату включительно</strong><br><input type="date" name="f152_clear_until" max="<?php echo esc_attr( current_time( 'Y-m-d' ) ); ?>" required></label></p>
+							<p><label><strong>Пароль очистки</strong><br><input type="password" name="f152_clear_password" autocomplete="current-password" required></label></p>
+							<?php submit_button( 'Удалить выбранный период', 'delete', 'submit', false ); ?>
+						</form>
+					<?php endif; ?>
+
+					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+						<input type="hidden" name="action" value="f152_log_cleanup_password">
+						<?php wp_nonce_field( 'f152_log_cleanup_password', 'f152_log_password_nonce' ); ?>
+						<?php if ( '' !== $cleanup_hash ) : ?>
+							<p><label><strong>Текущий пароль</strong><br><input type="password" name="f152_current_cleanup_password" autocomplete="current-password" required></label></p>
+						<?php endif; ?>
+						<p><label><strong><?php echo esc_html( '' === $cleanup_hash ? 'Новый пароль очистки' : 'Новый пароль' ); ?></strong><br><input type="password" name="f152_new_cleanup_password" minlength="8" autocomplete="new-password" required></label></p>
+						<p><label><strong>Повторите пароль</strong><br><input type="password" name="f152_confirm_cleanup_password" minlength="8" autocomplete="new-password" required></label></p>
+						<?php submit_button( '' === $cleanup_hash ? 'Задать пароль защиты' : 'Изменить пароль защиты', 'secondary', 'submit', false ); ?>
+					</form>
+					<p class="description">Защита предотвращает случайную или намеренную очистку через интерфейс FZ-152 без отдельного пароля. Пользователь с полным доступом к серверу или базе данных технически может обойти защиту.</p>
+				</div>
+			</details>
 
  			<?php if ( empty($logs) ) : ?>
  				<p>Записей пока нет.</p>

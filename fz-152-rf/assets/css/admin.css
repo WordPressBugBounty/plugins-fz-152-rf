@@ -1901,3 +1901,22 @@ textarea.large-text {
 .f152-log-decision.is-declined { background: #f2f4f7; color: #475467; }
 .f152-log-event__meta { margin-top: 5px; color: #667085; font-size: 11px; }
 .f152-log-event__text { margin-top: 6px; color: #667085; font-size: 12px; line-height: 1.45; }
+
+.f152-api-docs .f152-api-code {
+	box-sizing: border-box;
+	max-width: 100%;
+	overflow: auto;
+	padding: 14px 16px;
+	border: 1px solid #d0d5dd;
+	border-radius: 8px;
+	background: #f8fafc;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+.f152-api-docs .f152-api-code code {
+	padding: 0;
+	background: transparent;
+	font-family: Consolas, Monaco, monospace;
+	font-size: 12px;
+}
+.f152-api-docs table code { white-space: nowrap; }

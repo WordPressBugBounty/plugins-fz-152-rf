@@ -7,24 +7,22 @@ final class ServiceScanner {
 
 	private const TRANSIENT_TTL          = 10 * MINUTE_IN_SECONDS;
 	private const RESPONSE_LIMIT         = 5 * MB_IN_BYTES;
-	private const REQUEST_TIMEOUT        = 15;
-	private const TRANSIENT_KEY          = 'f152_service_scan_site_v24';
-	private const BROWSER_TRANSIENT_KEY  = 'f152_service_scan_browser_home_v2';
-	private const BROWSER_TRANSIENT_TTL  = 60;
-	private const LOCK_OPTION            = 'f152_service_scan_lock_v1';
-	private const LOCK_TTL               = 5 * MINUTE_IN_SECONDS;
-
-	private static $lock_token = '';
+	private const TRANSIENT_KEY          = 'f152_service_scan_site_v27';
+	private const BROWSER_TRANSIENT_KEY  = 'f152_service_scan_browser_site_v5';
+	private const BROWSER_WORK_KEY       = 'f152_service_scan_browser_work_v1';
+	private const BROWSER_LOCK_KEY       = 'f152_service_scan_browser_lock_v1';
+	private const BROWSER_LOCK_TTL       = 90;
+	private const BROWSER_TRANSIENT_TTL  = 10 * MINUTE_IN_SECONDS;
 
 	public static function get_issues(): array {
+		$issues = self::get_consent_system_conflicts();
 		$result = self::get_scan_result();
 		if ( empty( $result['ok'] ) || empty( $result['services'] ) || ! is_array( $result['services'] ) ) {
-			return [];
+			return $issues;
 		}
 
 		$definitions = self::definitions();
 		$statuses    = self::get_control_statuses();
-		$issues      = [];
 
 		foreach ( $result['services'] as $service_id => $detection ) {
 			if ( empty( $detection['found_external'] ) || ! isset( $definitions[ $service_id ] ) ) {
@@ -135,6 +133,46 @@ final class ServiceScanner {
 		return $issues;
 	}
 
+	private static function get_consent_system_conflicts(): array {
+		if ( ! class_exists( '\SEO_Fury_Privacy' ) ) {
+			return [];
+		}
+
+		$banner = get_option( 'seo_fury_privacy_banner', [] );
+		$forms  = get_option( 'seo_fury_privacy_forms', [] );
+		$banner = is_array( $banner ) ? $banner : [];
+		$forms  = is_array( $forms ) ? $forms : [];
+		$banner_enabled = ! empty( $banner['enabled'] );
+		$forms_enabled  = ! empty( $forms['enabled'] );
+
+		if ( ! $banner_enabled && ! $forms_enabled ) {
+			return [];
+		}
+
+		$parts = [];
+		if ( $banner_enabled ) {
+			$parts[] = __( 'cookie-баннер и управление категориями cookie', 'fz-152-rf' );
+		}
+		if ( $forms_enabled ) {
+			$parts[] = __( 'чекбоксы согласия в формах', 'fz-152-rf' );
+		}
+		$message = sprintf(
+			/* translators: %s: active SEO Fury privacy features. */
+			__( 'Одновременно с FZ-152 включён модуль SEO Fury Privacy & Consent (%s). Две системы согласий могут показать посетителю дублирующиеся баннеры или чекбоксы и по-разному управлять загрузкой сервисов. Оставьте управление согласиями только в одной системе; если используете FZ-152, отключите соответствующие функции Privacy & Consent в SEO Fury.', 'fz-152-rf' ),
+			implode( ', ', $parts )
+		);
+
+		return [
+			[
+				'id'        => 'seo_fury_privacy_conflict',
+				'label'     => 'SEO Fury Privacy & Consent',
+				'message'   => $message,
+				'ids'       => [],
+				'locations' => [],
+			],
+		];
+	}
+
 	public static function get_scan_snapshot(): array {
 		return self::get_scan_result();
 	}
@@ -142,6 +180,10 @@ final class ServiceScanner {
 	public static function clear_cache(): void {
 		self::clear_server_cache();
 		delete_transient( self::BROWSER_TRANSIENT_KEY );
+		delete_transient( self::BROWSER_WORK_KEY );
+		self::release_browser_scan_lock();
+		delete_transient( 'f152_service_scan_browser_home_v2' );
+		delete_transient( 'f152_service_scan_browser_site_v4' );
 	}
 
 	public static function clear_server_cache(): void {
@@ -170,6 +212,9 @@ final class ServiceScanner {
 			'f152_service_scan_site_v21',
 			'f152_service_scan_site_v22',
 			'f152_service_scan_site_v23',
+			'f152_service_scan_site_v24',
+			'f152_service_scan_site_v25',
+			'f152_service_scan_site_v26',
 		] as $legacy_key ) {
 			delete_transient( $legacy_key );
 		}
@@ -185,43 +230,44 @@ final class ServiceScanner {
 			return $cached;
 		}
 
+		$browser = get_transient( self::BROWSER_TRANSIENT_KEY );
+		if ( is_array( $browser ) ) {
+			set_transient( self::TRANSIENT_KEY, $browser, self::TRANSIENT_TTL );
+			return $browser;
+		}
+
 		if ( ! self::may_start_scan() ) {
 			return self::empty_scan_result( 'suppressed_context' );
 		}
 
-		if ( ! self::acquire_lock() ) {
-			$cached = get_transient( self::TRANSIENT_KEY );
-			return is_array( $cached ) ? $cached : self::empty_scan_result( 'scan_busy' );
-		}
-
-		try {
-			$browser_snapshot = get_transient( self::BROWSER_TRANSIENT_KEY );
-
-			$result = self::scan_site();
-			$result = self::merge_browser_home_snapshot(
-				$result,
-				is_array( $browser_snapshot ) ? $browser_snapshot : []
-			);
-			set_transient( self::TRANSIENT_KEY, $result, self::TRANSIENT_TTL );
-
-			return $result;
-		} finally {
-			self::release_lock();
-		}
+		$plan = self::get_browser_scan_plan();
+		$result = [
+			'ok'         => false,
+			'url'        => home_url( '/' ),
+			'scanned_at' => 0,
+			'services'   => self::empty_service_results( self::definitions() ),
+			'scan_meta'  => [
+				'home_ok'              => false,
+				'home_error'           => [],
+				'candidate_pages'      => max( 0, count( $plan['targets'] ) - 1 ),
+				'rendered_pages'       => 0,
+				'failed_pages'         => 0,
+				'failed_page_details' => [],
+				'browser_pending'      => true,
+				'browser_complete'     => false,
+				'target_pages'         => count( $plan['targets'] ),
+				'total_pages'          => (int) $plan['total_pages'],
+				'truncated'            => ! empty( $plan['truncated'] ),
+			],
+		];
+		set_transient( self::TRANSIENT_KEY, $result, MINUTE_IN_SECONDS );
+		return $result;
 	}
 
 	private static function may_start_scan(): bool {
 		if ( defined( 'DOING_CRON' ) && DOING_CRON ) {
 			return false;
 		}
-
-		$internal_header = isset( $_SERVER['HTTP_X_F152_SCANNER'] )
-			? sanitize_text_field( wp_unslash( (string) $_SERVER['HTTP_X_F152_SCANNER'] ) )
-			: '';
-		if ( '1' === $internal_header ) {
-			return false;
-		}
-
 		return is_admin() && current_user_can( 'manage_options' );
 	}
 
@@ -238,75 +284,247 @@ final class ServiceScanner {
 		];
 	}
 
-	private static function acquire_lock(): bool {
-		$now = time();
-		$existing = get_option( self::LOCK_OPTION, [] );
-		if ( is_array( $existing ) && (int) ( $existing['expires'] ?? 0 ) > $now ) {
-			return false;
-		}
+	public static function get_browser_scan_plan(): array {
+		$soft_limit = (int) apply_filters( 'f152_scanner_browser_page_limit', 50 );
+		$soft_limit = max( 5, min( 200, $soft_limit ) );
+		$hard_limit = 200;
+		$definitions = self::definitions();
+		$home_url = home_url( '/' );
+		$targets = [ [ 'url' => $home_url, 'title' => __( 'Главная страница', 'fz-152-rf' ), 'home' => true ] ];
+		$page_ids = get_posts( [
+			'post_type' => 'page',
+			'post_status' => 'publish',
+			'posts_per_page' => -1,
+			'fields' => 'ids',
+			'orderby' => 'ID',
+			'order' => 'ASC',
+			'no_found_rows' => true,
+			'update_post_meta_cache' => false,
+			'update_post_term_cache' => false,
+		] );
+		$page_ids = is_array( $page_ids ) ? $page_ids : [];
 
-		if ( false !== $existing && [] !== $existing ) {
-			delete_option( self::LOCK_OPTION );
+		$priority_ids = [];
+		if ( function_exists( 'wc_get_page_id' ) ) {
+			foreach ( [ 'checkout', 'myaccount' ] as $wc_page ) {
+				$id = (int) wc_get_page_id( $wc_page );
+				if ( $id > 0 && 'publish' === get_post_status( $id ) ) $priority_ids[] = $id;
+			}
 		}
+		$priority_ids = array_values( array_unique( $priority_ids ) );
 
-		$token = function_exists( 'wp_generate_uuid4' ) ? wp_generate_uuid4() : uniqid( 'f152-', true );
-		$value = [
-			'token'   => $token,
-			'expires' => $now + self::LOCK_TTL,
+		$front_page_id = (int) get_option( 'page_on_front', 0 );
+		$priority = [];
+		$candidates = [];
+		$others = [];
+		foreach ( $page_ids as $page_id ) {
+			$page_id = (int) $page_id;
+			if ( $page_id <= 0 || ( $front_page_id > 0 && $page_id === $front_page_id ) ) continue;
+			$url = get_permalink( $page_id );
+			if ( ! is_string( $url ) || '' === $url ) continue;
+			$item = [
+				'url' => $url,
+				'title' => get_the_title( $page_id ) ?: sprintf(
+					/* translators: %d: WordPress page ID. */
+					__( 'Страница #%d', 'fz-152-rf' ),
+					$page_id
+				),
+				'home' => false,
+			];
+			if ( in_array( $page_id, $priority_ids, true ) ) {
+				$priority[] = $item;
+				continue;
+			}
+			$source = self::get_page_source( $page_id );
+			if ( '' !== $source && ( ! empty( self::get_detected_definitions( $source, $definitions ) ) || preg_match( '/<form\\b|contact-form-7|wpforms|forminator|fluentform|ninja_form|gravityform|sureforms|formidable|formlayer|srfm|metform|elementor.*form|woocommerce|my[_ -]?account/i', $source ) ) ) {
+				$candidates[] = $item;
+			} else {
+				$others[] = $item;
+			}
+		}
+		$selected = array_merge( $priority, $candidates );
+		$room = max( 0, $soft_limit - 1 - count( $selected ) );
+		if ( $room > 0 ) $selected = array_merge( $selected, array_slice( $others, 0, $room ) );
+		$selected = array_slice( $selected, 0, $hard_limit - 1 );
+		$targets = array_merge( $targets, $selected );
+		$total = 1 + count( $priority ) + count( $candidates ) + count( $others );
+		return [
+			'targets' => $targets,
+			'total_pages' => $total,
+			'truncated' => count( $targets ) < $total,
 		];
+	}
 
-		if ( ! add_option( self::LOCK_OPTION, $value, '', false ) ) {
+	public static function has_fresh_browser_snapshot(): bool {
+		$snapshot = get_transient( self::BROWSER_TRANSIENT_KEY );
+		return is_array( $snapshot ) && ! empty( $snapshot['scan_meta']['browser_complete'] );
+	}
+
+	public static function acquire_browser_scan_lock(): bool {
+		$now = time();
+		$locked_at = (int) get_option( self::BROWSER_LOCK_KEY, 0 );
+		if ( $locked_at > 0 && ( $now - $locked_at ) >= self::BROWSER_LOCK_TTL ) {
+			delete_option( self::BROWSER_LOCK_KEY );
+		}
+		return add_option( self::BROWSER_LOCK_KEY, $now, '', false );
+	}
+
+	public static function release_browser_scan_lock(): void {
+		delete_option( self::BROWSER_LOCK_KEY );
+	}
+
+	public static function touch_browser_scan_lock(): void {
+		if ( get_option( self::BROWSER_LOCK_KEY, 0 ) ) {
+			update_option( self::BROWSER_LOCK_KEY, time(), false );
+		}
+	}
+
+	public static function begin_browser_scan(): void {
+		$previous = get_transient( self::BROWSER_TRANSIENT_KEY );
+		$plan = self::get_browser_scan_plan();
+		$work = [
+			'forms' => [],
+			'previous_fingerprint' => is_array( $previous ) ? self::service_fingerprint( (array) ( $previous['services'] ?? [] ) ) : '',
+			'services' => self::empty_service_results( self::definitions() ),
+			'scan_meta' => [
+				'home_ok' => false,
+				'home_error' => [],
+				'candidate_pages' => max( 0, count( $plan['targets'] ) - 1 ),
+				'rendered_pages' => 0,
+				'failed_pages' => 0,
+				'failed_page_details' => [],
+				'browser_pending' => true,
+				'browser_complete' => false,
+				'target_pages' => count( $plan['targets'] ),
+				'total_pages' => (int) $plan['total_pages'],
+				'truncated' => ! empty( $plan['truncated'] ),
+			],
+		];
+		set_transient( self::BROWSER_WORK_KEY, $work, self::BROWSER_TRANSIENT_TTL );
+		delete_transient( self::TRANSIENT_KEY );
+	}
+
+	public static function store_browser_page_html( string $url, string $title, string $html, bool $home = false ): bool {
+		if ( ! self::is_allowed_browser_url( $url ) ) {
 			return false;
 		}
-
-		self::$lock_token = (string) $token;
-		return true;
-	}
-
-	private static function release_lock(): void {
-		if ( '' === self::$lock_token ) {
-			return;
-		}
-
-		$current = get_option( self::LOCK_OPTION, [] );
-		if ( is_array( $current ) && hash_equals( self::$lock_token, (string) ( $current['token'] ?? '' ) ) ) {
-			delete_option( self::LOCK_OPTION );
-		}
-		self::$lock_token = '';
-	}
-
-	public static function store_browser_home_html( string $html ): array {
 		if ( strlen( $html ) > self::RESPONSE_LIMIT ) {
 			$html = substr( $html, 0, self::RESPONSE_LIMIT );
 		}
-
-		$definitions = self::definitions();
-		$services = self::empty_service_results( $definitions );
-		if ( '' !== trim( $html ) ) {
-			self::merge_source_into_services(
-				$services,
-				$html,
-				$definitions,
-				[
-					'title' => __( 'Главная страница', 'fz-152-rf' ),
-					'url'   => home_url( '/' ),
-					'kind'  => 'rendered',
-				]
-			);
+		$work = get_transient( self::BROWSER_WORK_KEY );
+		if ( ! is_array( $work ) ) {
+			self::begin_browser_scan();
+			$work = get_transient( self::BROWSER_WORK_KEY );
 		}
+		if ( ! is_array( $work ) ) {
+			return false;
+		}
+		$services = isset( $work['services'] ) && is_array( $work['services'] ) ? $work['services'] : self::empty_service_results( self::definitions() );
+		if ( '' !== trim( $html ) ) {
+			self::merge_source_into_services( $services, $html, self::definitions(), [
+				'title' => sanitize_text_field( $title ),
+				'url' => esc_url_raw( $url ),
+				'kind' => 'rendered',
+			] );
+		}
+		$work['forms'] = self::merge_form_signals( (array) ( $work['forms'] ?? [] ), FormSignals::extract( $html, $url, $title ) );
+		$work['services'] = $services;
+		$work['scan_meta']['rendered_pages'] = (int) ( $work['scan_meta']['rendered_pages'] ?? 0 ) + 1;
+		if ( $home ) {
+			$work['scan_meta']['home_ok'] = true;
+			$work['scan_meta']['home_error'] = [];
+		}
+		set_transient( self::BROWSER_WORK_KEY, $work, self::BROWSER_TRANSIENT_TTL );
+		return true;
+	}
 
-		$snapshot = [
-			'ok'         => '' !== trim( $html ),
+	private static function merge_form_signals( array $existing, array $incoming ): array {
+		foreach ( $incoming as $key => $form ) {
+			if ( ! is_array( $form ) ) continue;
+			if ( ! isset( $existing[ $key ] ) || ! is_array( $existing[ $key ] ) ) {
+				$form['occurrences'] = max( 1, (int) ( $form['occurrences'] ?? 1 ) );
+				$form['urls'] = array_values( array_unique( array_filter( array_map( 'esc_url_raw', (array) ( $form['urls'] ?? [ $form['url'] ?? '' ] ) ) ) ) );
+				$existing[ $key ] = $form;
+				continue;
+			}
+
+			$current = $existing[ $key ];
+			$current['occurrences'] = max( 1, (int) ( $current['occurrences'] ?? 1 ) ) + max( 1, (int) ( $form['occurrences'] ?? 1 ) );
+			$current['urls'] = array_values( array_unique( array_filter( array_merge(
+				(array) ( $current['urls'] ?? [ $current['url'] ?? '' ] ),
+				(array) ( $form['urls'] ?? [ $form['url'] ?? '' ] )
+			) ) ) );
+			$current['types'] = array_values( array_unique( array_merge( (array) ( $current['types'] ?? [] ), (array) ( $form['types'] ?? [] ) ) ) );
+			$current['partial_name'] = ! empty( $current['partial_name'] ) || ! empty( $form['partial_name'] );
+			$current['marketing'] = ! empty( $current['marketing'] ) || ! empty( $form['marketing'] );
+			$current['consent'] = ! empty( $current['consent'] ) || ! empty( $form['consent'] );
+			if ( empty( $current['submit_text'] ) && ! empty( $form['submit_text'] ) ) $current['submit_text'] = sanitize_text_field( (string) $form['submit_text'] );
+
+			$field_map = [];
+			foreach ( array_merge( (array) ( $current['fields'] ?? [] ), (array) ( $form['fields'] ?? [] ) ) as $field ) {
+				if ( ! is_array( $field ) ) continue;
+				$fk = (string) ( $field['name'] ?? '' ) . '|' . (string) ( $field['type'] ?? '' ) . '|' . (string) ( $field['semantic'] ?? '' );
+				$field_map[ $fk ] = $field;
+			}
+			$current['fields'] = array_values( $field_map );
+			$existing[ $key ] = $current;
+		}
+		if ( count( $existing ) > 300 ) $existing = array_slice( $existing, 0, 300, true );
+		return $existing;
+	}
+
+	public static function finish_browser_scan( array $failures = [] ): array {
+		$work = get_transient( self::BROWSER_WORK_KEY );
+		if ( ! is_array( $work ) ) {
+			return [ 'changed' => false, 'labels' => [], 'scanned' => 0, 'failed' => 0 ];
+		}
+		$details = [];
+		foreach ( array_slice( $failures, 0, 3 ) as $failure ) {
+			if ( ! is_array( $failure ) ) {
+				continue;
+			}
+			$details[] = [
+				'title' => sanitize_text_field( (string) ( $failure['title'] ?? 'Страница' ) ),
+				'url' => esc_url_raw( (string) ( $failure['url'] ?? '' ) ),
+				'error_type' => 'browser',
+				'error_code' => '',
+				'error_message' => sanitize_text_field( (string) ( $failure['message'] ?? 'Не удалось загрузить страницу браузером' ) ),
+				'status_code' => (int) ( $failure['status'] ?? 0 ),
+			];
+		}
+		$work['scan_meta']['failed_pages'] = count( $failures );
+		$work['scan_meta']['failed_page_details'] = $details;
+		$work['scan_meta']['browser_pending'] = false;
+		$work['scan_meta']['browser_complete'] = true;
+		if ( empty( $work['scan_meta']['home_ok'] ) && ! empty( $failures ) ) {
+			$home_failure = $failures[0];
+			if ( is_array( $home_failure ) && ! empty( $home_failure['home'] ) ) {
+				$work['scan_meta']['home_error'] = [
+					'type' => 'browser',
+					'code' => '',
+					'message' => sanitize_text_field( (string) ( $home_failure['message'] ?? 'Не удалось загрузить главную страницу браузером' ) ),
+					'http_code' => (int) ( $home_failure['status'] ?? 0 ),
+				];
+			}
+		}
+		$services = isset( $work['services'] ) && is_array( $work['services'] ) ? $work['services'] : self::empty_service_results( self::definitions() );
+		$work['forms'] = self::merge_form_signals( (array) ( $work['forms'] ?? [] ), self::builtin_form_signals() );
+		$fingerprint = self::service_fingerprint( $services );
+		$previous = (string) ( $work['previous_fingerprint'] ?? '' );
+		$result = [
+			'ok' => ! empty( $work['scan_meta']['rendered_pages'] ),
+			'url' => home_url( '/' ),
 			'scanned_at' => time(),
-			'fingerprint'=> self::service_fingerprint( $services ),
-			'services'   => $services,
+			'forms' => (array) ( $work['forms'] ?? [] ),
+			'form_signals_available' => class_exists( '\DOMDocument' ),
+			'fingerprint' => $fingerprint,
+			'services' => $services,
+			'scan_meta' => $work['scan_meta'],
 		];
-		$previous = get_transient( self::BROWSER_TRANSIENT_KEY );
-		$previous_fingerprint = is_array( $previous ) ? (string) ( $previous['fingerprint'] ?? '' ) : '';
-
-		set_transient( self::BROWSER_TRANSIENT_KEY, $snapshot, self::BROWSER_TRANSIENT_TTL );
-		self::clear_server_cache();
-
+		set_transient( self::BROWSER_TRANSIENT_KEY, $result, self::BROWSER_TRANSIENT_TTL );
+		set_transient( self::TRANSIENT_KEY, $result, self::TRANSIENT_TTL );
+		delete_transient( self::BROWSER_WORK_KEY );
+		do_action( 'f152_service_scan_completed', $result );
 		$labels = [];
 		foreach ( $services as $service_id => $detection ) {
 			if ( empty( $detection['found_external'] ) && empty( $detection['found_managed'] ) ) {
@@ -315,56 +533,49 @@ final class ServiceScanner {
 			$definition = ServiceCatalog::get( (string) $service_id );
 			$labels[] = sanitize_text_field( (string) ( $definition['label'] ?? $service_id ) );
 		}
-
 		return [
-			'changed' => $previous_fingerprint !== (string) $snapshot['fingerprint'],
-			'labels'  => array_values( array_unique( array_filter( $labels ) ) ),
+			'changed' => true,
+			'labels' => array_values( array_unique( array_filter( $labels ) ) ),
+			'scanned' => (int) ( $work['scan_meta']['rendered_pages'] ?? 0 ),
+			'failed' => count( $failures ),
+			'truncated' => ! empty( $work['scan_meta']['truncated'] ),
 		];
 	}
 
-	private static function merge_browser_home_snapshot( array $result, array $browser ): array {
-		if ( empty( $browser['ok'] ) || empty( $browser['services'] ) || ! is_array( $browser['services'] ) ) {
-			return $result;
-		}
-
-		if ( empty( $result['services'] ) || ! is_array( $result['services'] ) ) {
-			$result['services'] = self::empty_service_results( self::definitions() );
-		}
-
-		foreach ( $browser['services'] as $service_id => $detection ) {
-			if ( ! isset( $result['services'][ $service_id ] ) || ! is_array( $detection ) ) {
-				continue;
-			}
-			if ( ! empty( $detection['found_external'] ) ) {
-				$result['services'][ $service_id ]['found_external'] = true;
-			}
-			if ( ! empty( $detection['found_managed'] ) ) {
-				$result['services'][ $service_id ]['found_managed'] = true;
-			}
-			$result['services'][ $service_id ]['ids'] = array_values( array_unique( array_merge(
-				(array) ( $result['services'][ $service_id ]['ids'] ?? [] ),
-				(array) ( $detection['ids'] ?? [] )
-			) ) );
-			foreach ( (array) ( $detection['locations'] ?? [] ) as $location ) {
-				if ( is_array( $location ) ) {
-					self::append_location( $result['services'][ $service_id ]['locations'], $location );
-				}
-			}
-			foreach ( (array) ( $detection['managed_locations'] ?? [] ) as $location ) {
-				if ( is_array( $location ) ) {
-					self::append_location( $result['services'][ $service_id ]['managed_locations'], $location );
-				}
+	private static function builtin_form_signals(): array {
+		$forms = [];
+		if ( class_exists( '\\WooCommerce' ) && function_exists( 'wc_get_page_id' ) ) {
+			$account_id = (int) wc_get_page_id( 'myaccount' );
+			if ( $account_id > 0 && 'publish' === get_post_status( $account_id ) ) {
+				$key = substr( hash( 'sha256', 'woocommerce|registration|registration' ), 0, 20 );
+				$url = esc_url_raw( (string) get_permalink( $account_id ) );
+				$forms[ $key ] = [
+					'id' => $key, 'kind' => 'registration', 'provider' => 'WooCommerce', 'provider_key' => 'woocommerce',
+					'provider_id' => 'registration', 'title' => 'Мой аккаунт', 'page_title' => get_the_title( $account_id ) ?: 'Мой аккаунт',
+					'url' => $url, 'urls' => [ $url ], 'occurrences' => 1,
+					'types' => 'yes' === (string) get_option( 'woocommerce_enable_myaccount_registration', 'no' ) ? [ 'email' ] : [],
+					'partial_name' => false, 'marketing' => false, 'fields' => [], 'submit_text' => '', 'evidence' => 'woocommerce_myaccount_page',
+				];
 			}
 		}
-
-		$result['ok'] = true;
-		$result['scan_meta'] = isset( $result['scan_meta'] ) && is_array( $result['scan_meta'] ) ? $result['scan_meta'] : [];
-		$result['scan_meta']['home_ok'] = true;
-		$result['scan_meta']['browser_home_ok'] = true;
-		$result['scan_meta']['browser_scanned_at'] = (int) ( $browser['scanned_at'] ?? 0 );
-		$result['scan_meta']['home_error'] = [];
-		return $result;
+		return $forms;
 	}
+
+	private static function is_allowed_browser_url( string $url ): bool {
+		$home = wp_parse_url( home_url( '/' ) );
+		$target = wp_parse_url( $url );
+		if ( ! is_array( $home ) || ! is_array( $target ) ) {
+			return false;
+		}
+		return strtolower( (string) ( $home['host'] ?? '' ) ) === strtolower( (string) ( $target['host'] ?? '' ) );
+	}
+
+	public static function store_browser_home_html( string $html ): array {
+		self::begin_browser_scan();
+		self::store_browser_page_html( home_url( '/' ), __( 'Главная страница', 'fz-152-rf' ), $html, true );
+		return self::finish_browser_scan();
+	}
+
 
 	private static function service_fingerprint( array $services ): string {
 		$compact = [];
@@ -385,191 +596,6 @@ final class ServiceScanner {
 		return md5( wp_json_encode( $compact ) ?: '' );
 	}
 
-	private static function scan_site(): array {
-		$definitions = self::definitions();
-		$services    = self::empty_service_results( $definitions );
-		$scanned_any = false;
-		$home_url    = home_url( '/' );
-		$scan_meta   = [
-			'home_ok'         => false,
-			'home_error'      => [],
-			'candidate_pages' => 0,
-			'rendered_pages'  => 0,
-			'failed_pages'    => 0,
-			'failed_page_details' => [],
-		];
-
-		$home = self::fetch_url_html( $home_url );
-		if ( ! empty( $home['ok'] ) ) {
-			$scanned_any = true;
-			$scan_meta['home_ok'] = true;
-			self::merge_source_into_services(
-				$services,
-				(string) $home['body'],
-				$definitions,
-				[
-					'title' => __( 'Главная страница', 'fz-152-rf' ),
-					'url'   => $home_url,
-					'kind'  => 'rendered',
-				]
-			);
-		} else {
-			$scan_meta['home_error'] = [
-				'type'       => sanitize_key( (string) ( $home['error_type'] ?? '' ) ),
-				'code'       => sanitize_text_field( (string) ( $home['error_code'] ?? '' ) ),
-				'message'    => sanitize_text_field( (string) ( $home['error_message'] ?? '' ) ),
-				'http_code'  => isset( $home['status_code'] ) ? (int) $home['status_code'] : 0,
-			];
-		}
-
-		$page_ids = get_posts(
-			[
-				'post_type'              => 'page',
-				'post_status'            => 'publish',
-				'posts_per_page'         => -1,
-				'fields'                 => 'ids',
-				'orderby'                => 'ID',
-				'order'                  => 'ASC',
-				'no_found_rows'          => true,
-				'update_post_meta_cache' => false,
-				'update_post_term_cache' => false,
-			]
-		);
-
-		if ( is_array( $page_ids ) ) {
-			$front_page_id = (int) get_option( 'page_on_front', 0 );
-			foreach ( $page_ids as $page_id ) {
-				$page_id = (int) $page_id;
-				if ( $page_id <= 0 ) {
-					continue;
-				}
-
-				if ( $scan_meta['home_ok'] && $front_page_id > 0 && $page_id === $front_page_id ) {
-					continue;
-				}
-
-				$source = self::get_page_source( $page_id );
-				if ( '' === $source ) {
-					continue;
-				}
-
-				$candidate_definitions = self::get_detected_definitions( $source, $definitions );
-				if ( empty( $candidate_definitions ) ) {
-					continue;
-				}
-				$scan_meta['candidate_pages']++;
-
-				$page_title = get_the_title( $page_id ) ?: sprintf(
-					/* translators: %d: WordPress page ID. */
-					__( 'Страница #%d', 'fz-152-rf' ),
-					$page_id
-				);
-				$page_url = get_permalink( $page_id );
-				if ( ! is_string( $page_url ) || '' === $page_url ) {
-					$scan_meta['failed_pages']++;
-					if ( count( $scan_meta['failed_page_details'] ) < 3 ) {
-						$scan_meta['failed_page_details'][] = [
-							'title' => sanitize_text_field( (string) $page_title ),
-							'url' => '',
-							'error_type' => 'permalink',
-							'error_code' => '',
-							'error_message' => 'WordPress did not return a page URL',
-							'status_code' => 0,
-						];
-					}
-					continue;
-				}
-
-				$rendered = self::fetch_url_html( $page_url );
-				if ( empty( $rendered['ok'] ) ) {
-					$scan_meta['failed_pages']++;
-					if ( count( $scan_meta['failed_page_details'] ) < 3 ) {
-						$scan_meta['failed_page_details'][] = [
-							'title' => sanitize_text_field( (string) $page_title ),
-							'url' => esc_url_raw( $page_url ),
-							'error_type' => sanitize_key( (string) ( $rendered['error_type'] ?? '' ) ),
-							'error_code' => sanitize_text_field( (string) ( $rendered['error_code'] ?? '' ) ),
-							'error_message' => sanitize_text_field( (string) ( $rendered['error_message'] ?? '' ) ),
-							'status_code' => isset( $rendered['status_code'] ) ? (int) $rendered['status_code'] : 0,
-						];
-					}
-					continue;
-				}
-
-				$scanned_any = true;
-				$scan_meta['rendered_pages']++;
-				self::merge_source_into_services(
-					$services,
-					(string) $rendered['body'],
-					$definitions,
-					[
-						'title' => $page_title,
-						'url'   => $page_url,
-						'kind'  => 'rendered',
-					]
-				);
-			}
-		}
-
-		return [
-			'ok'         => $scanned_any,
-			'url'        => $home_url,
-			'scanned_at' => time(),
-			'services'   => $services,
-			'scan_meta'  => $scan_meta,
-		];
-	}
-
-	private static function fetch_url_html( string $url ): array {
-		$response = wp_safe_remote_get(
-			$url,
-			[
-				'timeout'             => self::REQUEST_TIMEOUT,
-				'redirection'         => 3,
-				'limit_response_size' => self::RESPONSE_LIMIT,
-				'user-agent'          => 'Mozilla/5.0 (compatible; FZ152Scanner/' . F152_VERSION . ')',
-				'headers'             => [
-					'X-F152-Scanner' => '1',
-				],
-			]
-		);
-
-		if ( is_wp_error( $response ) ) {
-			return [
-				'ok'            => false,
-				'body'          => '',
-				'error_type'    => 'request',
-				'error_code'    => (string) $response->get_error_code(),
-				'error_message' => (string) $response->get_error_message(),
-				'status_code'   => 0,
-			];
-		}
-
-		$status_code = (int) wp_remote_retrieve_response_code( $response );
-		$body        = (string) wp_remote_retrieve_body( $response );
-		if ( $status_code < 200 || $status_code >= 400 ) {
-			return [
-				'ok'            => false,
-				'body'          => '',
-				'error_type'    => 'http',
-				'error_code'    => '',
-				'error_message' => (string) wp_remote_retrieve_response_message( $response ),
-				'status_code'   => $status_code,
-			];
-		}
-		if ( '' === $body ) {
-			return [
-				'ok'            => false,
-				'body'          => '',
-				'error_type'    => 'empty',
-				'error_code'    => '',
-				'error_message' => 'empty response body',
-				'status_code'   => $status_code,
-			];
-		}
-
-		return [ 'ok' => true, 'body' => $body, 'status_code' => $status_code ];
-	}
 
 	private static function get_detected_definitions( string $source, array $definitions ): array {
 		$detected = [];

@@ -82,7 +82,8 @@
                 }
 
                 var cfg = window.F152AdminScanner;
-                if (!cfg.homeUrl || !cfg.ajaxUrl || !cfg.nonce || typeof window.fetch !== 'function') {
+                var targets = Array.isArray(cfg.targets) ? cfg.targets : [];
+                if (!cfg.ajaxUrl || !cfg.nonce || !targets.length || typeof window.fetch !== 'function') {
                         return;
                 }
 
@@ -101,78 +102,172 @@
                         root.setAttribute('aria-busy', state === 'scanning' ? 'true' : 'false');
                 }
 
-                setScanState('scanning', 'Сканирование…');
-                if (status) {
-                        status.textContent = 'Сканирование ещё выполняется. Результат обновится автоматически.';
+                function reloadAfterScan() {
+                        try {
+                                var url = new URL(window.location.href);
+                                url.searchParams.delete('f152_force_scan');
+                                window.location.replace(url.toString());
+                        } catch (e) {
+                                window.location.reload();
+                        }
                 }
 
-                fetch(cfg.homeUrl, {
-                        method: 'GET',
-                        credentials: 'same-origin',
-                        cache: 'no-store',
-                        headers: { 'X-F152-Browser-Scan': '1' }
-                })
-                .then(function(response) {
-                        if (!response.ok) {
-                                throw new Error('HTTP ' + response.status);
-                        }
-                        return response.text();
-                })
-                .then(function(html) {
-                        if (!html) {
-                                throw new Error('empty');
-                        }
-
-                        if (html.length > 5 * 1024 * 1024) {
-                                html = html.slice(0, 5 * 1024 * 1024);
-                        }
-
+                function post(mode, fields) {
                         var body = new FormData();
-                        body.append('action', 'f152_browser_scan_home');
+                        body.append('action', 'f152_browser_scan_site');
                         body.append('nonce', cfg.nonce);
-                        body.append('html', html);
-
+                        body.append('mode', mode);
+                        Object.keys(fields || {}).forEach(function(key) {
+                                body.append(key, fields[key]);
+                        });
                         return fetch(cfg.ajaxUrl, {
                                 method: 'POST',
                                 credentials: 'same-origin',
                                 cache: 'no-store',
                                 body: body
+                        }).then(function(response) {
+                                if (!response.ok) {
+                                        throw new Error('AJAX HTTP ' + response.status);
+                                }
+                                return response.json();
+                        }).then(function(payload) {
+                                if (!payload || !payload.success) {
+                                        throw new Error('scan failed');
+                                }
+                                return payload.data || {};
                         });
-                })
-                .then(function(response) {
-                        if (!response.ok) {
-                                throw new Error('AJAX HTTP ' + response.status);
-                        }
-                        return response.json();
-                })
-                .then(function(payload) {
-                        if (!payload || !payload.success || !payload.data) {
-                                throw new Error('scan failed');
-                        }
+                }
 
-                        var labels = Array.isArray(payload.data.labels) ? payload.data.labels : [];
-                        if (payload.data.changed) {
+                function fetchTarget(target) {
+                        var controller = typeof window.AbortController === 'function' ? new AbortController() : null;
+                        var timer = controller ? window.setTimeout(function(){ controller.abort(); }, 12000) : null;
+                        return fetch(target.url, {
+                                method: 'GET',
+                                credentials: 'same-origin',
+                                cache: 'no-store',
+                                signal: controller ? controller.signal : undefined
+                        }).then(function(response) {
+                                if (timer) {
+                                        window.clearTimeout(timer);
+                                }
+                                if (!response.ok) {
+                                        var error = new Error('HTTP ' + response.status);
+                                        error.status = response.status;
+                                        throw error;
+                                }
+                                return response.text();
+                        }).then(function(html) {
+                                if (!html) {
+                                        throw new Error('Пустой ответ');
+                                }
+                                if (html.length > 5 * 1024 * 1024) {
+                                        html = html.slice(0, 5 * 1024 * 1024);
+                                }
+                                return post('page', {
+                                        url: target.url,
+                                        title: target.title || target.url,
+                                        home: target.home ? '1' : '0',
+                                        html: html
+                                });
+                        });
+                }
+
+                if (!cfg.autoRun) {
+                        setScanState('success', 'Готово');
+                        return;
+                }
+
+                if (window.__F152_BROWSER_SCAN_STARTED__) {
+                        setScanState('error', 'Уже запущено');
+                        if (status) {
+                                status.textContent = 'Проверка сайта уже выполняется на этой странице.';
+                        }
+                        return;
+                }
+
+                var completedTab = 'main';
+                try {
+                        completedTab = (new URL(window.location.href)).searchParams.get('tab') || 'main';
+                } catch (e) {}
+                var completedKey = 'f152_browser_scan_just_completed_v1:' + completedTab;
+                if (!cfg.forceRun) {
+                        try {
+                                var completedAt = parseInt(window.sessionStorage ? window.sessionStorage.getItem(completedKey) : '', 10) || 0;
+                                if (completedAt && (Date.now() - completedAt) < 120000) {
+                                        if (window.sessionStorage) {
+                                                window.sessionStorage.removeItem(completedKey);
+                                        }
+                                        setScanState('success', 'Готово');
+                                        if (status) {
+                                                status.textContent = 'Предыдущая проверка только что завершилась. Повторный автоматический запуск остановлен.';
+                                        }
+                                        return;
+                                }
+                        } catch (e) {}
+                }
+
+                window.__F152_BROWSER_SCAN_STARTED__ = true;
+
+                var failures = [];
+                var scanned = 0;
+                setScanState('scanning', 'Сканирование…');
+                if (status) {
+                        status.textContent = 'Подготавливаю проверку страниц…';
+                }
+
+                post('begin', {}).then(function() {
+                        var chain = Promise.resolve();
+                        targets.forEach(function(target, index) {
+                                chain = chain.then(function() {
+                                        if (status) {
+                                                status.textContent = 'Проверяю страницу ' + (index + 1) + ' из ' + targets.length + ': ' + (target.title || target.url);
+                                        }
+                                        return fetchTarget(target).then(function() {
+                                                scanned++;
+                                        }).catch(function(error) {
+                                                failures.push({
+                                                        url: target.url,
+                                                        title: target.title || target.url,
+                                                        home: target.home ? 1 : 0,
+                                                        status: error && error.status ? error.status : 0,
+                                                        message: error && error.message ? error.message : 'Не удалось загрузить страницу'
+                                                });
+                                                return post('heartbeat', {}).catch(function(){ return {}; });
+                                        });
+                                });
+                        });
+                        return chain;
+                }).then(function() {
+                        return post('finish', { failures: JSON.stringify(failures) });
+                }).then(function(data) {
+                        var labels = Array.isArray(data.labels) ? data.labels : [];
+                        if (data.changed) {
                                 setScanState('scanning', 'Обновляю…');
                                 if (status) {
                                         status.textContent = labels.length
                                                 ? 'Найдены сервисы: ' + labels.join(', ') + '. Обновляю результаты…'
-                                                : 'Результат проверки изменился. Обновляю страницу…';
+                                                : 'Проверка завершена. Обновляю результаты…';
                                 }
-                                window.setTimeout(function(){ window.location.reload(); }, 150);
+                                try {
+                                        if (window.sessionStorage) {
+                                                window.sessionStorage.setItem(completedKey, String(Date.now()));
+                                        }
+                                } catch (e) {}
+                                window.setTimeout(reloadAfterScan, 150);
                                 return;
                         }
 
-                        setScanState('success', 'Готово');
+                        setScanState(data.failed ? 'error' : 'success', data.failed ? 'Не всё проверено' : 'Готово');
                         if (status) {
-                                status.textContent = labels.length
-                                        ? 'Проверка завершена. Браузер дополнительно подтвердил на главной странице: ' + labels.join(', ') + '.'
-                                        : 'Проверка завершена. Главная страница дополнительно проверена браузером.';
+                                status.textContent = 'Проверено страниц: ' + (data.scanned || scanned) + '. Ошибок загрузки: ' + (data.failed || 0) + '.';
+                                if (data.truncated) {
+                                        status.textContent += ' На очень большом сайте проверка ограничена приоритетными страницами.';
+                                }
                         }
-                })
-                .catch(function(error) {
+                }).catch(function(error) {
                         setScanState('error', 'Не завершено');
                         if (status) {
-                                status.textContent = 'Проверка браузером не завершилась. Нажмите «Проверить сайт сейчас» или обновите страницу.';
+                                status.textContent = 'Проверка браузером не завершилась. Нажмите «Проверить сайт сейчас» и попробуйте ещё раз.';
                         }
                         if (window.console && typeof window.console.debug === 'function') {
                                 window.console.debug('FZ-152 browser scanner:', error);

@@ -105,7 +105,11 @@
     isAllowed: isCategoryAllowed,
     allowCategory: allowCategory,
     hasCurrentConsent: function() { return getConsentState().current; },
-    getVersion: function() { return COOKIE_VER; }
+    getVersion: function() { return COOKIE_VER; },
+    openSettings: function() {
+      syncPopupFromCookie();
+      openPopup();
+    }
   };
 
   function dispatchConsentChanged(payload) {

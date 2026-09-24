@@ -36,7 +36,12 @@ final class Consent {
 	}
 
 	public static function current_version() : string {
-		return self::normalize_version( get_option( 'f152_policy_version', '' ) );
+		if ( class_exists( '\\F152\\API' ) && method_exists( '\\F152\\API', 'get_policy_version' ) ) {
+			return \F152\API::get_policy_version();
+		}
+
+		$value = self::normalize_version( get_option( 'f152_policy_version', '1.0' ) );
+		return $value !== '' ? $value : '1.0';
 	}
 
 	public static function legacy_version() : string {

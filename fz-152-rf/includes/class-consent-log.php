@@ -145,6 +145,20 @@ final class ConsentLog {
 
 		$table_name = self::get_table_name();
 
+		$policy_version = isset( $data['policy_version'] ) && is_scalar( $data['policy_version'] )
+			? trim( sanitize_text_field( (string) $data['policy_version'] ) )
+			: '';
+		if ( $policy_version === '' ) {
+			if ( class_exists( '\\F152\\API' ) && method_exists( '\\F152\\API', 'get_policy_version' ) ) {
+				$policy_version = \F152\API::get_policy_version();
+			} else {
+				$policy_version = trim( sanitize_text_field( (string) get_option( 'f152_policy_version', '1.0' ) ) );
+				if ( $policy_version === '' ) {
+					$policy_version = '1.0';
+				}
+			}
+		}
+
 		$insert_data = [
 			'created_at'     => current_time( 'mysql' ),
 			'source_type'    => $source_type,
@@ -156,7 +170,7 @@ final class ConsentLog {
 			'ip_address'     => sanitize_text_field( $data['ip_address'] ?? '' ),
 			'user_agent'     => sanitize_text_field( $data['user_agent'] ?? '' ),
 			'consent_text'   => wp_kses_post( $data['consent_text'] ?? '' ),
-			'policy_version' => sanitize_text_field( $data['policy_version'] ?? '' ),
+			'policy_version' => $policy_version,
 			'policy_url'     => esc_url_raw( $data['policy_url'] ?? '' ),
 			'source_uid'     => $source_uid !== '' ? mb_substr( sanitize_text_field( $source_uid ), 0, 191 ) : null,
 			'source_plugin'  => isset( $data['source_plugin'] ) && is_scalar( $data['source_plugin'] )
@@ -253,7 +267,12 @@ final class ConsentLog {
 		return null;
 	}
 
+	private static function can_manage_admin_log(): bool {
+		return function_exists( 'current_user_can' ) && current_user_can( 'manage_options' );
+	}
+
 	public static function get_logs( int $page = 1, int $per_page = 50 ): array {
+		if ( ! self::can_manage_admin_log() ) { return []; }
 		global $wpdb;
 
 		if ( ! self::table_exists() ) {
@@ -277,6 +296,7 @@ final class ConsentLog {
 	}
 
 	public static function get_total_count(): int {
+		if ( ! self::can_manage_admin_log() ) { return 0; }
 		global $wpdb;
 
 		if ( ! self::table_exists() ) {
@@ -292,6 +312,7 @@ final class ConsentLog {
 	}
 
 	public static function get_all_for_export(): array {
+		if ( ! self::can_manage_admin_log() ) { return []; }
 		global $wpdb;
 
 		if ( ! self::table_exists() ) {
@@ -307,7 +328,251 @@ final class ConsentLog {
 		);
 	}
 
+	public static function get_readonly_api_batch( array $args = [] ): array {
+		global $wpdb;
+
+		if ( ! self::table_exists() ) {
+			return [
+				'items'          => [],
+				'has_more'       => false,
+				'next_after_id'  => null,
+				'next_before_id' => null,
+			];
+		}
+
+		$limit = max( 1, min( 100, (int) ( $args['limit'] ?? 50 ) ) );
+		$after_id = max( 0, (int) ( $args['after_id'] ?? 0 ) );
+		$before_id = max( 0, (int) ( $args['before_id'] ?? 0 ) );
+		$order = 'desc' === strtolower( (string) ( $args['order'] ?? '' ) ) ? 'DESC' : 'ASC';
+		$include_technical = ! empty( $args['include_technical'] );
+		$source_type = isset( $args['source_type'] ) ? sanitize_key( (string) $args['source_type'] ) : '';
+		$source_plugin = isset( $args['source_plugin'] ) ? sanitize_text_field( (string) $args['source_plugin'] ) : '';
+		$source_uid = isset( $args['source_uid'] ) ? sanitize_text_field( (string) $args['source_uid'] ) : '';
+		$created_after = isset( $args['created_after'] ) ? sanitize_text_field( (string) $args['created_after'] ) : '';
+		$created_before = isset( $args['created_before'] ) ? sanitize_text_field( (string) $args['created_before'] ) : '';
+
+		$table_name = esc_sql( self::get_table_name() );
+		$limit_plus_one = $limit + 1;
+
+		// phpcs:disable WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- The table identifier is generated only from $wpdb->prefix plus the fixed f152_consent_log suffix. WordPress 6.0 does not support the %i identifier placeholder; all request-derived values below are passed through $wpdb->prepare() placeholders.
+
+		if ( $include_technical ) {
+			if ( 'DESC' === $order ) {
+				$rows = $wpdb->get_results(
+					$wpdb->prepare(
+						'SELECT id, created_at, source_type, source_id, source_uid, source_plugin, source_label, page_url, form_id, form_title, email, full_name, phone, consent_text, policy_version, policy_url, consent_hash, context, user_id, ip_address, user_agent FROM `' . $table_name . '` WHERE (%d = 0 OR id > %d) AND (%d = 0 OR id < %d) AND (%s = \'\' OR source_type = %s) AND (%s = \'\' OR source_plugin = %s) AND (%s = \'\' OR source_uid = %s) AND (%s = \'\' OR created_at >= %s) AND (%s = \'\' OR created_at <= %s) ORDER BY id DESC LIMIT %d',
+						$after_id,
+						$after_id,
+						$before_id,
+						$before_id,
+						$source_type,
+						$source_type,
+						$source_plugin,
+						$source_plugin,
+						$source_uid,
+						$source_uid,
+						$created_after,
+						$created_after,
+						$created_before,
+						$created_before,
+						$limit_plus_one
+					),
+					ARRAY_A
+				);
+			} else {
+				$rows = $wpdb->get_results(
+					$wpdb->prepare(
+						'SELECT id, created_at, source_type, source_id, source_uid, source_plugin, source_label, page_url, form_id, form_title, email, full_name, phone, consent_text, policy_version, policy_url, consent_hash, context, user_id, ip_address, user_agent FROM `' . $table_name . '` WHERE (%d = 0 OR id > %d) AND (%d = 0 OR id < %d) AND (%s = \'\' OR source_type = %s) AND (%s = \'\' OR source_plugin = %s) AND (%s = \'\' OR source_uid = %s) AND (%s = \'\' OR created_at >= %s) AND (%s = \'\' OR created_at <= %s) ORDER BY id ASC LIMIT %d',
+						$after_id,
+						$after_id,
+						$before_id,
+						$before_id,
+						$source_type,
+						$source_type,
+						$source_plugin,
+						$source_plugin,
+						$source_uid,
+						$source_uid,
+						$created_after,
+						$created_after,
+						$created_before,
+						$created_before,
+						$limit_plus_one
+					),
+					ARRAY_A
+				);
+			}
+		} elseif ( 'DESC' === $order ) {
+			$rows = $wpdb->get_results(
+				$wpdb->prepare(
+					'SELECT id, created_at, source_type, source_id, source_uid, source_plugin, source_label, page_url, form_id, form_title, email, full_name, phone, consent_text, policy_version, policy_url, consent_hash, context FROM `' . $table_name . '` WHERE (%d = 0 OR id > %d) AND (%d = 0 OR id < %d) AND (%s = \'\' OR source_type = %s) AND (%s = \'\' OR source_plugin = %s) AND (%s = \'\' OR source_uid = %s) AND (%s = \'\' OR created_at >= %s) AND (%s = \'\' OR created_at <= %s) ORDER BY id DESC LIMIT %d',
+					$after_id,
+					$after_id,
+					$before_id,
+					$before_id,
+					$source_type,
+					$source_type,
+					$source_plugin,
+					$source_plugin,
+					$source_uid,
+					$source_uid,
+					$created_after,
+					$created_after,
+					$created_before,
+					$created_before,
+					$limit_plus_one
+				),
+				ARRAY_A
+			);
+		} else {
+			$rows = $wpdb->get_results(
+				$wpdb->prepare(
+					'SELECT id, created_at, source_type, source_id, source_uid, source_plugin, source_label, page_url, form_id, form_title, email, full_name, phone, consent_text, policy_version, policy_url, consent_hash, context FROM `' . $table_name . '` WHERE (%d = 0 OR id > %d) AND (%d = 0 OR id < %d) AND (%s = \'\' OR source_type = %s) AND (%s = \'\' OR source_plugin = %s) AND (%s = \'\' OR source_uid = %s) AND (%s = \'\' OR created_at >= %s) AND (%s = \'\' OR created_at <= %s) ORDER BY id ASC LIMIT %d',
+					$after_id,
+					$after_id,
+					$before_id,
+					$before_id,
+					$source_type,
+					$source_type,
+					$source_plugin,
+					$source_plugin,
+					$source_uid,
+					$source_uid,
+					$created_after,
+					$created_after,
+					$created_before,
+					$created_before,
+					$limit_plus_one
+				),
+				ARRAY_A
+			);
+		}
+		// phpcs:enable WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter
+
+		$rows = is_array( $rows ) ? $rows : [];
+
+		$has_more = count( $rows ) > $limit;
+		if ( $has_more ) {
+			$rows = array_slice( $rows, 0, $limit );
+		}
+
+		$items = [];
+		foreach ( $rows as $row ) {
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			$row['id'] = (int) ( $row['id'] ?? 0 );
+			$row['source_id'] = (int) ( $row['source_id'] ?? 0 );
+			$event_meta = self::api_event_meta( $row['context'] ?? '' );
+			$row['consent_kind'] = $event_meta['consent_kind'];
+			$row['decision'] = $event_meta['decision'];
+			$row['required'] = $event_meta['required'];
+			if ( $include_technical ) {
+				$row['user_id'] = (int) ( $row['user_id'] ?? 0 );
+				if ( isset( $row['context'] ) && is_string( $row['context'] ) && '' !== $row['context'] ) {
+					$decoded = json_decode( $row['context'], true );
+					if ( JSON_ERROR_NONE === json_last_error() && is_array( $decoded ) ) {
+						$row['context'] = $decoded;
+					}
+				}
+			} else {
+				unset( $row['context'], $row['user_id'], $row['ip_address'], $row['user_agent'] );
+			}
+			$items[] = $row;
+		}
+
+		$last_id = ! empty( $items ) ? (int) ( $items[ count( $items ) - 1 ]['id'] ?? 0 ) : 0;
+
+		return [
+			'items'          => $items,
+			'has_more'       => $has_more,
+			'next_after_id'  => 'ASC' === $order && $last_id > 0 ? $last_id : null,
+			'next_before_id' => 'DESC' === $order && $last_id > 0 ? $last_id : null,
+		];
+	}
+
+	private static function api_event_meta( $context ): array {
+		$decoded = [];
+		if ( is_array( $context ) ) {
+			$decoded = $context;
+		} elseif ( is_string( $context ) && '' !== trim( $context ) ) {
+			$value = json_decode( $context, true );
+			if ( JSON_ERROR_NONE === json_last_error() && is_array( $value ) ) {
+				$decoded = $value;
+			}
+		}
+
+		$kind = isset( $decoded['consent_kind'] ) && is_scalar( $decoded['consent_kind'] )
+			? sanitize_key( (string) $decoded['consent_kind'] )
+			: 'personal';
+		if ( ! in_array( $kind, [ 'personal', 'marketing', 'custom' ], true ) ) {
+			$kind = 'personal';
+		}
+		$decision = isset( $decoded['decision'] ) && is_scalar( $decoded['decision'] )
+			? sanitize_key( (string) $decoded['decision'] )
+			: 'accepted';
+		$decision = 'declined' === $decision ? 'declined' : 'accepted';
+		$required = 'custom' === $kind ? ! empty( $decoded['required'] ) : null;
+
+		return [
+			'consent_kind' => $kind,
+			'decision'     => $decision,
+			'required'     => $required,
+		];
+	}
+
+	public static function count_through_date( string $date ): int {
+		if ( ! self::can_manage_admin_log() ) { return 0; }
+		global $wpdb;
+
+		$until = self::normalize_cleanup_date( $date );
+		if ( null === $until || ! self::table_exists() ) {
+			return 0;
+		}
+
+		$table_name = esc_sql( self::get_table_name() );
+
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- The table identifier is generated only from $wpdb->prefix plus the fixed f152_consent_log suffix. WordPress 6.0 does not support the %i identifier placeholder; the date value remains parameterized with $wpdb->prepare().
+		$count = $wpdb->get_var(
+			$wpdb->prepare( "SELECT COUNT(*) FROM `{$table_name}` WHERE created_at <= %s", $until )
+		);
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+		return (int) $count;
+	}
+
+	public static function delete_through_date( string $date ) {
+		if ( ! self::can_manage_admin_log() ) { return false; }
+		global $wpdb;
+
+		$until = self::normalize_cleanup_date( $date );
+		if ( null === $until || ! self::table_exists() ) {
+			return false;
+		}
+
+		$table_name = esc_sql( self::get_table_name() );
+
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- The table identifier is generated only from $wpdb->prefix plus the fixed f152_consent_log suffix. WordPress 6.0 does not support the %i identifier placeholder; the date value remains parameterized with $wpdb->prepare().
+		$result = $wpdb->query(
+			$wpdb->prepare( "DELETE FROM `{$table_name}` WHERE created_at <= %s", $until )
+		);
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+		return false === $result ? false : (int) $result;
+	}
+
+	private static function normalize_cleanup_date( string $date ): ?string {
+		$date = sanitize_text_field( trim( $date ) );
+		$dt = \DateTimeImmutable::createFromFormat( '!Y-m-d', $date, wp_timezone() );
+		$errors = \DateTimeImmutable::getLastErrors();
+		if ( false === $dt || ( is_array( $errors ) && ( ! empty( $errors['warning_count'] ) || ! empty( $errors['error_count'] ) ) ) ) {
+			return null;
+		}
+		return $dt->setTime( 23, 59, 59 )->format( 'Y-m-d H:i:s' );
+	}
+
 	public static function truncate_table(): bool {
+		if ( ! self::can_manage_admin_log() ) { return false; }
 		global $wpdb;
 
 		if ( ! self::table_exists() ) {
@@ -316,10 +581,11 @@ final class ConsentLog {
 
 		$table_name = esc_sql( self::get_table_name() );
 
+		// phpcs:disable WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- The table identifier is generated only from $wpdb->prefix plus the fixed f152_consent_log suffix. WordPress 6.0 does not support the %i identifier placeholder; this statement contains no user-controlled values.
 		$result = $wpdb->query(
-			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name cannot use placeholders and is escaped with esc_sql().
 			"TRUNCATE TABLE `{$table_name}`"
 		);
+		// phpcs:enable WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
 		return $result !== false;
 	}
@@ -329,10 +595,11 @@ final class ConsentLog {
 
 		$table_name = esc_sql( self::get_table_name() );
 
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.SchemaChange, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- The table identifier is generated only from $wpdb->prefix plus the fixed f152_consent_log suffix. WordPress 6.0 does not support the %i identifier placeholder; this uninstall statement contains no user-controlled values.
 		$wpdb->query(
-			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.SchemaChange, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name cannot use placeholders and is escaped with esc_sql().
 			"DROP TABLE IF EXISTS `{$table_name}`"
 		);
+		// phpcs:enable WordPress.DB.DirectDatabaseQuery.SchemaChange, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 	}
 }
 // phpcs:enable WordPress.DB.DirectDatabaseQuery

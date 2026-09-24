@@ -5,7 +5,6 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 
 final class Survey {
 	private const STATUS_OPTION = 'f152_survey_status_v1';
-	private const ENDPOINT      = 'https://kotikblog.ru/wp-json/ls/v1/f152-survey';
 
 	public static function init() : void {
 		add_action( 'admin_post_f152_submit_survey', [ __CLASS__, 'handle_submit' ] );
@@ -23,14 +22,14 @@ final class Survey {
 	private static function partner_url() : string {
 		return (string) apply_filters(
 			'f152_partner_program_url',
-			'https://kotikblog.ru/fz152-partner/?utm_source=free_plugin&utm_medium=survey&utm_campaign=partner_program'
+			add_query_arg( [ 'utm_source' => 'free_plugin', 'utm_medium' => 'survey', 'utm_campaign' => 'partner_program', 'utm_content' => 'survey_partner_offer' ], F152_PARTNER_URL )
 		);
 	}
 
 	private static function pro_buy_url() : string {
 		return (string) apply_filters(
 			'f152_pro_buy_url',
-			'https://kotikblog.ru/product/fz-152-rf-pro/?utm_source=free_plugin&utm_medium=survey&utm_campaign=owner_multisite_discount'
+			add_query_arg( [ 'utm_source' => 'free_plugin', 'utm_medium' => 'survey', 'utm_campaign' => 'owner_multisite_discount', 'utm_content' => 'survey_multisite_offer' ], F152_PURCHASE_URL )
 		);
 	}
 
@@ -196,8 +195,9 @@ final class Survey {
 			'plugin_version'   => defined( 'F152_VERSION' ) ? (string) F152_VERSION : '',
 		];
 
+		$endpoint = defined( 'F152_SURVEY_ENDPOINT' ) ? (string) F152_SURVEY_ENDPOINT : 'https://fz152rf.ru/wp-json/ls/v1/f152-survey';
 		$response = wp_remote_post(
-			self::ENDPOINT,
+			$endpoint,
 			[
 				'timeout'     => 8,
 				'redirection' => 0,

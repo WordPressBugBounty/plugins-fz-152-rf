@@ -77,6 +77,10 @@ $f152_opts = [
 	'f152_text_consent_marketing',
 	'f152_policy_version',
 	'f152_consent_log_db_version',
+	'f152_log_cleanup_password_hash',
+	'f152_api_tokens_v1',
+	'f152_policy_snapshots_db_version',
+	'f152_policy_snapshots_seeded_v1',
 
 	'f152_banner_stats_db_version',
 	'f152_banner_stats_salt',
@@ -91,7 +95,10 @@ foreach ( $f152_opts as $f152_opt ) {
 
 delete_transient( 'f152_service_scan_home_v2' );
 delete_transient( 'f152_service_scan_home_v3' );
-for ( $f152_scan_version = 4; $f152_scan_version <= 17; $f152_scan_version++ ) {
+delete_transient( 'f152_service_scan_browser_home_v2' );
+delete_transient( 'f152_service_scan_browser_site_v3' );
+delete_transient( 'f152_service_scan_browser_work_v1' );
+for ( $f152_scan_version = 4; $f152_scan_version <= 27; $f152_scan_version++ ) {
 	delete_transient( 'f152_service_scan_site_v' . $f152_scan_version );
 }
 
@@ -102,6 +109,12 @@ $f152_table_name = esc_sql( $wpdb->prefix . 'f152_consent_log' );
 $wpdb->query(
 	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Table name is internal, plugin-prefixed, and escaped with esc_sql(); identifier placeholders are unreliable in current tooling.
 	"DROP TABLE IF EXISTS `{$f152_table_name}`"
+);
+
+$f152_snapshots_table_name = esc_sql( $wpdb->prefix . 'f152_policy_snapshots' );
+$wpdb->query(
+	// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter
+	"DROP TABLE IF EXISTS `{$f152_snapshots_table_name}`"
 );
 
 $f152_stats_table_name = esc_sql( $wpdb->prefix . 'f152_banner_stats' );
@@ -115,3 +128,4 @@ $wpdb->query(
 wp_clear_scheduled_hook( 'f152_banner_stats_cleanup' );
 
 delete_option( 'f152_service_scan_lock_v1' );
+delete_option( 'f152_service_scan_browser_lock_v1' );

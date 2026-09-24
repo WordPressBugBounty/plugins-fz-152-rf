@@ -2,21 +2,27 @@
 /**
  * Plugin Name: FZ-152 RF
  * Description: Банер куки внизу сайта с кнопками принять/отклонить/настройки, не активные чекбоксы у отзывов, комментов и странице заказа WooCommerce, согласно ФЗ 152. Шаблоны с текстом страниц политик и соглашений.
- * Version: 0.2.6
+ * Version: 0.2.7
  * Author: Котик
  * License: GPLv2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
- * Author URI: https://kotikblog.ru
+ * Author URI: https://fz152rf.ru/?utm_source=free_plugin&utm_medium=plugin_meta&utm_campaign=site_visit&utm_content=author_uri
  * Text Domain: fz-152-rf
  */
 
 if ( ! defined('ABSPATH') ) exit;
 
-define('F152_VERSION', '0.2.6');
+define('F152_VERSION', '0.2.7');
 define('F152_FILE', __FILE__);
 define('F152_DIR', plugin_dir_path(__FILE__));
 define('F152_URL', plugin_dir_url(__FILE__));
 define('F152_SLUG', 'fz-152-rf');
+
+if ( ! defined( 'F152_PRODUCT_SITE_URL' ) ) define( 'F152_PRODUCT_SITE_URL', 'https://fz152rf.ru/' );
+if ( ! defined( 'F152_PURCHASE_URL' ) ) define( 'F152_PURCHASE_URL', 'https://fz152rf.ru/' );
+if ( ! defined( 'F152_SURVEY_ENDPOINT' ) ) define( 'F152_SURVEY_ENDPOINT', 'https://fz152rf.ru/wp-json/ls/v1/f152-survey' );
+if ( ! defined( 'F152_SUPPORT_URL' ) ) define( 'F152_SUPPORT_URL', 'https://fz152rf.ru/' );
+if ( ! defined( 'F152_PARTNER_URL' ) ) define( 'F152_PARTNER_URL', 'https://fz152rf.ru/fz152-partner/' );
 
 if ( ! defined( 'F152_HAS_CONSULTANTS_SERVICE_TAB' ) ) {
 	define( 'F152_HAS_CONSULTANTS_SERVICE_TAB', true );
@@ -34,6 +40,8 @@ require_once F152_DIR . 'includes/class-integrations.php';
 require_once F152_DIR . 'includes/class-plugin-detector.php';
 require_once F152_DIR . 'includes/class-service-catalog.php';
 require_once F152_DIR . 'includes/class-policy-services.php';
+require_once F152_DIR . 'includes/class-policy-snapshots.php';
+require_once F152_DIR . 'includes/class-form-signals.php';
 require_once F152_DIR . 'includes/class-service-scanner.php';
 require_once F152_DIR . 'includes/class-service-inventory.php';
 require_once F152_DIR . 'includes/class-survey.php';
@@ -42,9 +50,17 @@ require_once F152_DIR . 'includes/class-templates.php';
 
 
 require_once F152_DIR . 'includes/class-api.php';
+require_once F152_DIR . 'includes/class-developer-api.php';
+
+if ( class_exists( '\\F152\\DeveloperAPI' ) ) {
+	\F152\DeveloperAPI::init();
+}
 
 if ( class_exists( '\F152\PolicyServices' ) ) {
 	\F152\PolicyServices::init();
+}
+if ( class_exists( '\F152\PolicySnapshots' ) ) {
+	\F152\PolicySnapshots::init();
 }
 
 add_action( 'init', [ '\F152\Helpers', 'maybe_migrate_legacy_default_texts' ], 1 );
@@ -64,6 +80,33 @@ if ( ! function_exists( 'f152_has_capability' ) ) {
 			return \F152\API::has_capability( $capability, $min_version );
 		}
 		return false;
+	}
+}
+
+if ( ! function_exists( 'f152_get_api_version' ) ) {
+	function f152_get_api_version() : string {
+		if ( class_exists( '\F152\API' ) ) {
+			return \F152\API::get_api_version();
+		}
+		return '';
+	}
+}
+
+if ( ! function_exists( 'f152_get_consent_text' ) ) {
+	function f152_get_consent_text( string $context = 'external' ) : string {
+		if ( class_exists( '\F152\API' ) ) {
+			return \F152\API::get_consent_text( $context );
+		}
+		return '';
+	}
+}
+
+if ( ! function_exists( 'f152_process_external_consent' ) ) {
+	function f152_process_external_consent( array $request = [], array $integration = [] ) {
+		if ( class_exists( '\F152\API' ) ) {
+			return \F152\API::process_external_consent( $request, $integration );
+		}
+		return new \WP_Error( 'f152_api_unavailable', __( 'API FZ-152 недоступен.', 'fz-152-rf' ) );
 	}
 }
 
@@ -196,6 +239,7 @@ register_activation_hook(__FILE__, function () {
 	}
 
 	add_option('f152_link_policy_pd', '');
+	add_option('f152_policy_version', \F152\API::DEFAULT_POLICY_VERSION);
 	add_option('f152_link_consent_pd', '');
 	add_option('f152_link_policy_cookie', '');
 	add_option('f152_link_consent_marketing', '');
@@ -240,6 +284,15 @@ register_activation_hook(__FILE__, function () {
 });
 
 add_action('plugins_loaded', function () {
+	if ( class_exists('\F152\API') ) {
+		$current_policy_version = get_option( 'f152_policy_version', null );
+		if ( null === $current_policy_version ) {
+			add_option( 'f152_policy_version', \F152\API::DEFAULT_POLICY_VERSION );
+		} elseif ( trim( sanitize_text_field( (string) $current_policy_version ) ) === '' ) {
+			update_option( 'f152_policy_version', \F152\API::DEFAULT_POLICY_VERSION );
+		}
+	}
+
 	if ( class_exists('\F152\Consent') ) {
 		\F152\Consent::maybe_initialize_versioning();
 	}

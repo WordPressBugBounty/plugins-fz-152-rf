@@ -4,17 +4,17 @@ Tags: 152-фз, персональные данные, cookie, согласие,
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 0.2.6
+Stable tag: 0.2.7
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Cookie banner. Consent checkboxes in forms and WooCommerce. Consent logging. Tracker scanner and Metrika control. Text templates.
+Cookie banner. Consent checkboxes in forms and WooCommerce. Consent logging. Website scanner, Metrika control, policy tools and developer API.
 
 == Description ==
 
 FZ-152 RF helps WordPress website owners handle the technical side of personal data consent and cookie management.
 
-The plugin adds a cookie consent banner, consent checkboxes for standard WordPress and WooCommerce forms, a consent log, policy and consent page templates, website diagnostics, and consent-based control of Yandex Metrica and Yandex Maps.
+The plugin adds a cookie consent banner, consent checkboxes for standard WordPress and WooCommerce forms, a consent log, policy and consent page templates, website diagnostics, consent-based control of Yandex Metrica and Yandex Maps, and a documented API for custom integrations.
 
 You do not need to understand how WordPress works internally. Fill in the website owner's details, enable the features you need, create the required pages, and open the Diagnostics tab. The plugin will check supported parts of the website and show what may require attention.
 
@@ -31,6 +31,7 @@ You do not need to understand how WordPress works internally. Fill in the websit
 * Records supported consent events in a consent log.
 * Stores the policy version together with consent records.
 * Allows the consent log to be exported to CSV.
+* Protects consent-log clearing with a separate password, so staff with WordPress admin access cannot erase records through FZ-152 without it.
 * Creates the main policy and consent pages with one click.
 * Allows existing policy pages to be used instead of creating new ones.
 * Controls Yandex Metrica according to the visitor's cookie choice.
@@ -41,6 +42,7 @@ You do not need to understand how WordPress works internally. Fill in the websit
 * Shows cookie-banner statistics.
 * Allows the cookie banner appearance to be customized.
 * Includes a Custom CSS section for additional appearance changes.
+* Includes a documented developer API for custom plugins, integrations and read-only server-to-server access.
 
 
 = Website diagnostics =
@@ -205,7 +207,7 @@ FZ-152 RF Pro is an add-on for the free FZ-152 RF plugin.
 
 The free plugin must remain installed and active.
 
-Pro is intended for websites that use third-party forms, additional analytics and advertising services, maps, videos, CRM systems, online chat widgets and other external integrations.
+Pro is intended for websites that use third-party forms, additional analytics and advertising services, maps, videos, CRM systems, online chat widgets and other external integrations. Pro also includes an assistant for preparing a Roskomnadzor personal-data processing notification: it uses the website scan, asks for information that cannot be determined automatically, and builds a draft using the same field names as the official form.
 
 
 = Third-party forms in Pro =
@@ -216,6 +218,9 @@ Supported integrations include:
 
 * Contact Form 7;
 * WPForms;
+* SureForms;
+* Formidable Forms;
+* FormLayer;
 * Ninja Forms;
 * Gravity Forms;
 * Fluent Forms;
@@ -279,7 +284,7 @@ Not necessarily.
 
 If your website uses standard WordPress or WooCommerce forms, Yandex Metrica and Yandex Maps, the free version may be enough.
 
-Pro is useful when the website uses supported third-party forms, additional trackers, maps, videos, CRM systems, JivoSite or other external services.
+Pro is useful when the website uses supported third-party forms, additional trackers, maps, videos, CRM systems, JivoSite or other external services, or when you want help preparing a Roskomnadzor notification draft.
 
 
 = Where data is stored =
@@ -297,12 +302,12 @@ The settings page may show an optional developer survey.
 
 Nothing is sent to the survey server until an administrator explicitly submits an answer.
 
-If an administrator chooses to participate, the selected answers and the installed FZ-152 RF version are sent to the developer's website at https://kotikblog.ru/.
+If an administrator chooses to participate, the selected answers and the installed FZ-152 RF version are sent to the FZ-152 RF service at https://fz152rf.ru/.
 
 The website's consent log and visitor personal data are not sent as part of the survey.
 
 Developer privacy policy:
-https://kotikblog.ru/pers-dannie-politika
+https://fz152rf.ru/pers-dannie-politika
 
 
 = Important =
@@ -478,7 +483,16 @@ FZ-152 RF сохраняет версию вместе с поддерживае
 
 Нет.
 
-Плагин не удаляет записи просто потому, что прошло несколько месяцев или лет. Очистить журнал может владелец сайта.
+Плагин не удаляет записи просто потому, что прошло несколько месяцев или лет.
+
+
+= Можно защитить журнал от очистки сотрудниками? =
+
+Да.
+
+Для очистки журнала можно задать отдельный пароль, который не совпадает с паролем WordPress. Без него удалить записи через интерфейс FZ-152 нельзя. Это позволяет дать сотрудникам доступ к админке и снизить риск случайной или намеренной очистки журнала.
+
+Пароль хранится только в виде хэша. Защита относится к интерфейсу FZ-152: пользователь с полным доступом к серверу или базе данных технически может её обойти.
 
 
 = Можно скачать журнал? =
@@ -527,7 +541,7 @@ Pro нужен для интеграции формы с системой FZ-152
 
 = Какие формы поддерживает Pro? =
 
-Сейчас поддерживаются Contact Form 7, WPForms, Ninja Forms, Gravity Forms, Fluent Forms, Forminator, MetForm, wpDiscuz, Elementor Pro Forms, Elementor Atomic Forms и простые пользовательские HTML-формы через Universal Forms.
+Сейчас поддерживаются Contact Form 7, WPForms, SureForms, Formidable Forms, FormLayer, Ninja Forms, Gravity Forms, Fluent Forms, Forminator, MetForm, wpDiscuz, Elementor Pro Forms, Elementor Atomic Forms и простые пользовательские HTML-формы через Universal Forms.
 
 
 = Pro работает без бесплатной версии? =
@@ -603,6 +617,17 @@ FZ-152 RF помогает с технической частью сайта: co
 4. Appearance of the footer banner (can be customized on the settings page).
 
 == Changelog ==
+
+= 0.2.7 =
+* Добавлено: публичный API для разработчиков и SaaS — PHP API для интеграций, JS API для чтения состояния cookie-согласия и read-only REST API для server-to-server подключений.
+* Добавлено: в Pro появился помощник по подготовке уведомления в Роскомнадзор — сканирование сайта, уточняющие вопросы и черновик по структуре официальной формы.
+* Добавлено распознавание SureForms, Formidable Forms и FormLayer в диагностике и журнале; для них доступны интеграции Pro.
+* Добавлено: диагностика конфликта с другими плагинами по ФЗ 152, если одновременно включены две системы согласий. Используйте 1 плагин, если функционала не хватает - напишите мне, чего именно, добавлю.
+* Улучшено: сканер точнее распознаёт формы и внешние сервисы, не считает технические формы WooCommerce формами обработки персональных данных и стабильнее работает на сайтах за reverse proxy/WAF.
+* Исправлено: версия политики по умолчанию 1.0 теперь корректно сохраняется в журнале согласий, если пользователь не задавал её вручную.
+* Добавлено: очистка журнала согласий защищается отдельным паролем — сотрудники с доступом к админке не смогут удалить записи через FZ-152 без него.
+* Добавлено: история снимков юридических страниц, чтобы можно было видеть сохранённые версии текстов независимо от WordPress Revisions.
+* Обновлены: сделал отдельный сайт плагина fz152rf.ru, все лицензии теперь живут там, как и поддержка - support@fz152rf.ru.
 
 = 0.2.6 =
 * Исправлено: устранена рекурсивная петля внутреннего сканера, которая на отдельных конфигурациях могла запускать множество loopback-запросов к сайту, перегружать WP-Cron, CPU и память.

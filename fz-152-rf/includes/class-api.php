@@ -8,7 +8,9 @@ if ( ! defined( 'ABSPATH' ) ) {
 final class API {
 
 	public const DEFAULT_NONCE_ACTION = 'f152_external_consent';
+	public const DEFAULT_POLICY_VERSION = '1.0';
 
+	private static $processed_transactions = [];
 
 	private static $context_option_map = [
 		'comment'  => 'f152_comment_text',
@@ -16,13 +18,26 @@ final class API {
 		'checkout' => 'f152_checkout_text',
 	];
 
+	public static function get_api_version() : string {
+		return class_exists( '\\F152\\DeveloperAPI' ) ? DeveloperAPI::API_VERSION : '1.0';
+	}
+
 	public static function is_enabled() : bool {
 		return (bool) get_option( 'f152_enabled', 1 );
 	}
 
 	public static function get_policy_version() : string {
-		$value = (string) get_option( 'f152_policy_version', '' );
-		return sanitize_text_field( $value );
+		$value = sanitize_text_field( (string) get_option( 'f152_policy_version', self::DEFAULT_POLICY_VERSION ) );
+		$value = trim( $value );
+
+		return $value !== '' ? $value : self::DEFAULT_POLICY_VERSION;
+	}
+
+	public static function sanitize_policy_version( $value ) : string {
+		$value = sanitize_text_field( is_scalar( $value ) ? (string) $value : '' );
+		$value = trim( $value );
+
+		return $value !== '' ? $value : self::DEFAULT_POLICY_VERSION;
 	}
 
 	public static function get_policy_url() : string {
@@ -220,8 +235,10 @@ final class API {
 				? sanitize_text_field( wp_unslash( $_SERVER['HTTP_USER_AGENT'] ) )
 				: '';
 		}
-		if ( ! isset( $data['policy_version'] ) ) {
+		if ( ! isset( $data['policy_version'] ) || ! is_scalar( $data['policy_version'] ) || trim( (string) $data['policy_version'] ) === '' ) {
 			$data['policy_version'] = self::get_policy_version();
+		} else {
+			$data['policy_version'] = self::sanitize_policy_version( $data['policy_version'] );
 		}
 		if ( ! isset( $data['policy_url'] ) ) {
 			$data['policy_url'] = self::get_policy_url();
@@ -263,6 +280,155 @@ final class API {
 
 		do_action( 'f152/consent_logged', $insert_id, $data );
 
+		return $insert_id;
+	}
+
+	public static function process_external_consent( array $request = [], array $integration = [] ) {
+		if ( ! self::is_enabled() ) {
+			return new \WP_Error(
+				'f152_disabled',
+				__( 'FZ-152 отключён, запись согласия не выполняется.', 'fz-152-rf' )
+			);
+		}
+
+		if ( empty( $request ) ) {
+			$request = $_POST; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified below.
+		}
+
+		$verify_args = [];
+		foreach ( [ 'field', 'nonce_field', 'nonce_action' ] as $key ) {
+			if ( isset( $integration[ $key ] ) && is_scalar( $integration[ $key ] ) ) {
+				$verify_args[ $key ] = (string) $integration[ $key ];
+			}
+		}
+		$verification = self::verify_consent( $request, $verify_args );
+		if ( empty( $verification['valid'] ) ) {
+			return new \WP_Error(
+				'f152_consent_invalid',
+				! empty( $verification['error'] ) ? (string) $verification['error'] : __( 'Согласие не прошло проверку.', 'fz-152-rf' )
+			);
+		}
+
+		$source_type_for_hash = isset( $integration['source_type'] ) && is_scalar( $integration['source_type'] )
+			? sanitize_text_field( (string) $integration['source_type'] )
+			: 'external';
+		if ( '' === $source_type_for_hash ) {
+			$source_type_for_hash = 'external';
+		}
+		$source_type = self::cut_string( sanitize_key( $source_type_for_hash ), 20 );
+		if ( '' === $source_type ) {
+			$source_type = 'external';
+		}
+
+		$source_id_for_hash = isset( $integration['source_id'] ) && is_scalar( $integration['source_id'] )
+			? sanitize_text_field( (string) $integration['source_id'] )
+			: '';
+		$source_id_raw = trim( $source_id_for_hash );
+		$form_id_for_hash = isset( $integration['form_id'] ) && is_scalar( $integration['form_id'] )
+			? sanitize_text_field( (string) $integration['form_id'] )
+			: '';
+		$form_id = self::cut_string( $form_id_for_hash, 100 );
+
+		$current_policy_version = self::get_policy_version();
+		$request_policy_version = self::request_scalar( $request, 'f152_policy_version' );
+		if ( '' === $request_policy_version || ! hash_equals( $current_policy_version, self::sanitize_policy_version( $request_policy_version ) ) ) {
+			return new \WP_Error(
+				'f152_policy_version_changed',
+				__( 'Версия согласия изменилась. Обновите страницу и повторите отправку.', 'fz-152-rf' )
+			);
+		}
+
+		$expected_hash = self::build_consent_hash(
+			self::get_consent_text( 'external' ),
+			$current_policy_version,
+			$source_type_for_hash,
+			$source_id_for_hash,
+			$form_id_for_hash
+		);
+		$request_hash = strtolower( preg_replace( '/[^0-9a-f]/i', '', self::request_scalar( $request, 'f152_consent_hash' ) ) );
+		if ( '' === $expected_hash || strlen( $request_hash ) !== 64 || ! hash_equals( strtolower( $expected_hash ), $request_hash ) ) {
+			return new \WP_Error(
+				'f152_consent_context_invalid',
+				__( 'Не удалось подтвердить контекст согласия. Обновите страницу и повторите отправку.', 'fz-152-rf' )
+			);
+		}
+
+		$source_uid = isset( $integration['source_uid'] ) && is_scalar( $integration['source_uid'] )
+			? self::cut_string( sanitize_text_field( (string) $integration['source_uid'] ), 191 )
+			: '';
+		if ( '' === $source_uid ) {
+			$identity = '' !== $source_id_raw ? $source_id_raw : $form_id;
+			if ( '' !== $identity ) {
+				$source_uid = self::cut_string( $source_type . ':' . sanitize_text_field( $identity ), 191 );
+			}
+		}
+		if ( '' === $source_uid && ( ! is_numeric( $source_id_raw ) || (int) $source_id_raw <= 0 ) ) {
+			return new \WP_Error(
+				'f152_source_missing',
+				__( 'Для записи согласия нужен source_id, source_uid или form_id.', 'fz-152-rf' )
+			);
+		}
+
+		$page_url = isset( $integration['page_url'] ) && is_scalar( $integration['page_url'] )
+			? (string) $integration['page_url']
+			: self::request_scalar( $request, 'f152_page_url' );
+		$page_url = self::sanitize_same_site_url( $page_url );
+
+		$log_context_raw = array_key_exists( 'log_context', $integration ) ? $integration['log_context'] : [];
+		$context = self::sanitize_public_context( $log_context_raw );
+		if ( is_wp_error( $context ) ) {
+			return $context;
+		}
+
+		$data = [
+			'source_type'   => $source_type,
+			'source_id'     => ( is_numeric( $source_id_raw ) && (int) $source_id_raw > 0 ) ? (int) $source_id_raw : 0,
+			'source_uid'    => $source_uid,
+			'source_plugin' => isset( $integration['source_plugin'] ) && is_scalar( $integration['source_plugin'] )
+				? self::cut_string( sanitize_text_field( (string) $integration['source_plugin'] ), 100 ) : '',
+			'source_label'  => isset( $integration['source_label'] ) && is_scalar( $integration['source_label'] )
+				? self::cut_string( sanitize_text_field( (string) $integration['source_label'] ), 255 ) : '',
+			'page_url'      => $page_url,
+			'form_id'       => $form_id,
+			'form_title'    => isset( $integration['form_title'] ) && is_scalar( $integration['form_title'] )
+				? self::cut_string( sanitize_text_field( (string) $integration['form_title'] ), 255 ) : '',
+			'email'         => isset( $integration['email'] ) && is_scalar( $integration['email'] ) ? sanitize_email( (string) $integration['email'] ) : '',
+			'full_name'     => isset( $integration['full_name'] ) && is_scalar( $integration['full_name'] )
+				? self::cut_string( sanitize_text_field( (string) $integration['full_name'] ), 255 ) : '',
+			'phone'         => isset( $integration['phone'] ) && is_scalar( $integration['phone'] ) ? (string) $integration['phone'] : '',
+			'user_id'       => get_current_user_id(),
+			'ip_address'    => isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : '',
+			'user_agent'    => isset( $_SERVER['HTTP_USER_AGENT'] ) ? self::cut_string( sanitize_text_field( wp_unslash( $_SERVER['HTTP_USER_AGENT'] ) ), 512 ) : '',
+			'consent_text'  => self::get_consent_text( 'external' ),
+			'policy_version'=> $current_policy_version,
+			'policy_url'    => self::get_policy_url(),
+			'consent_hash'  => $expected_hash,
+			'context'       => $context,
+		];
+
+		$fingerprint_payload = [
+			$data['source_type'],
+			$data['source_id'],
+			$data['source_uid'],
+			$data['form_id'],
+			$data['email'],
+			$data['phone'],
+			$data['consent_hash'],
+			$data['context'],
+		];
+		$fingerprint = hash( 'sha256', wp_json_encode( $fingerprint_payload ) ?: '' );
+		if ( isset( self::$processed_transactions[ $fingerprint ] ) ) {
+			return (int) self::$processed_transactions[ $fingerprint ];
+		}
+
+		$insert_id = self::log_consent( $data );
+		if ( ! is_int( $insert_id ) || $insert_id <= 0 ) {
+			return new \WP_Error(
+				'f152_consent_log_failed',
+				__( 'Не удалось записать согласие в журнал FZ-152.', 'fz-152-rf' )
+			);
+		}
+		self::$processed_transactions[ $fingerprint ] = $insert_id;
 		return $insert_id;
 	}
 
@@ -315,7 +481,10 @@ final class API {
 	public static function get_capabilities() : array {
 		$capabilities = [
 			'external_consent_api'   => 1,
+			'safe_external_consent_api' => 1,
 			'cookie_consent_api'     => 1,
+			'developer_js_api'       => 1,
+			'remote_read_api'        => 1,
 			'banner_designer_hooks'  => 1,
 			'services_bridge'        => 1,
 			'service_catalog'        => 1,
@@ -506,6 +675,86 @@ final class API {
 		}
 
 		return esc_url_raw( $scheme . '://' . $host . $uri );
+	}
+
+	private static function request_scalar( array $request, string $key ): string {
+		if ( ! isset( $request[ $key ] ) || ! is_scalar( $request[ $key ] ) ) {
+			return '';
+		}
+		return sanitize_text_field( wp_unslash( (string) $request[ $key ] ) );
+	}
+
+	private static function sanitize_same_site_url( string $url ): string {
+		$url = esc_url_raw( trim( $url ) );
+		if ( '' === $url ) {
+			return self::detect_canonical_current_url();
+		}
+		$site_host = strtolower( (string) wp_parse_url( home_url( '/' ), PHP_URL_HOST ) );
+		$url_host = strtolower( (string) wp_parse_url( $url, PHP_URL_HOST ) );
+		if ( '' === $url_host || '' === $site_host || $url_host !== $site_host ) {
+			return self::detect_canonical_current_url();
+		}
+		return $url;
+	}
+
+	private static function detect_canonical_current_url(): string {
+		$uri = isset( $_SERVER['REQUEST_URI'] ) && is_scalar( $_SERVER['REQUEST_URI'] )
+			? esc_url_raw( wp_unslash( (string) $_SERVER['REQUEST_URI'] ) )
+			: '/';
+		if ( '' === $uri || '/' !== substr( $uri, 0, 1 ) ) {
+			$uri = '/';
+		}
+		return esc_url_raw( home_url( $uri ) );
+	}
+
+	private static function sanitize_public_context( $context ) {
+		if ( null === $context || '' === $context ) {
+			return [];
+		}
+		if ( ! is_array( $context ) ) {
+			return new \WP_Error( 'f152_context_invalid', __( 'context должен быть массивом.', 'fz-152-rf' ) );
+		}
+		if ( count( $context ) > 50 ) {
+			return new \WP_Error( 'f152_context_too_large', __( 'В context слишком много полей.', 'fz-152-rf' ) );
+		}
+		$blocked = '/(?:pass(?:word)?|pwd|secret|token|authorization|cookie|session|api[_-]?key|card|cvv|cvc|pan)/i';
+		$out = [];
+		foreach ( $context as $key => $value ) {
+			$key = sanitize_key( (string) $key );
+			if ( '' === $key || preg_match( $blocked, $key ) ) {
+				continue;
+			}
+			if ( is_array( $value ) ) {
+				if ( count( $value ) > 20 ) {
+					return new \WP_Error( 'f152_context_too_large', __( 'Вложенный context слишком большой.', 'fz-152-rf' ) );
+				}
+				$nested = [];
+				foreach ( $value as $nested_key => $nested_value ) {
+					$nested_key = sanitize_key( (string) $nested_key );
+					if ( '' === $nested_key || preg_match( $blocked, $nested_key ) || ! is_scalar( $nested_value ) ) {
+						continue;
+					}
+					$nested[ $nested_key ] = self::cut_string( sanitize_textarea_field( (string) $nested_value ), 2048 );
+				}
+				$out[ $key ] = $nested;
+				continue;
+			}
+			if ( is_scalar( $value ) ) {
+				$out[ $key ] = self::cut_string( sanitize_textarea_field( (string) $value ), 2048 );
+			}
+		}
+		$json = wp_json_encode( $out );
+		if ( ! is_string( $json ) || strlen( $json ) > 16384 ) {
+			return new \WP_Error( 'f152_context_too_large', __( 'context превышает допустимый размер 16 КБ.', 'fz-152-rf' ) );
+		}
+		return $out;
+	}
+
+	private static function cut_string( string $value, int $length ): string {
+		if ( function_exists( 'mb_substr' ) ) {
+			return mb_substr( $value, 0, $length );
+		}
+		return substr( $value, 0, $length );
 	}
 
 	private static function build_consent_hash( string $consent_text, string $policy_version, string $source_type, string $source_id, string $form_id ) : string {
