@@ -197,26 +197,26 @@ final class ConsentLog {
 		}
 
 		$format = [
-			'%s', // created_at
-			'%s', // source_type
-			'%d', // source_id
-			'%s', // email
-			'%s', // full_name
-			'%s', // phone
-			'%d', // user_id
-			'%s', // ip_address
-			'%s', // user_agent
-			'%s', // consent_text
-			'%s', // policy_version
-			'%s', // policy_url
-			'%s', // source_uid
-			'%s', // source_plugin
-			'%s', // source_label
-			'%s', // page_url
-			'%s', // form_id
-			'%s', // form_title
-			'%s', // consent_hash
-			'%s', // context
+			'%s',  
+			'%s',  
+			'%d',  
+			'%s',  
+			'%s',  
+			'%s',  
+			'%d',  
+			'%s',  
+			'%s',  
+			'%s',  
+			'%s',  
+			'%s',  
+			'%s',  
+			'%s',  
+			'%s',  
+			'%s',  
+			'%s',  
+			'%s',  
+			'%s',  
+			'%s',  
 		];
 
 		$result = $wpdb->insert( $table_name, $insert_data, $format );

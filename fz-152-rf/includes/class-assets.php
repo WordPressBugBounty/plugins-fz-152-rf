@@ -358,6 +358,10 @@ final class Assets {
 				'ignoreAfterSeconds'=> class_exists('\\F152\\BannerStats') ? \F152\BannerStats::get_ignore_after_seconds() : 1800,
 				'sessionStorageKey' => 'f152_bs_token',
 			],
+			'cookieLog' => [
+				'enabled' => CookieConsentLog::is_enabled(),
+				'endpointUrl' => rest_url( 'f152/v1/cookie-consent-log' ),
+			],
 		];
 	}
 

@@ -11,6 +11,7 @@ final class Settings {
                 $group_toggle   = 'f152_toggle';
 
                 self::register_csv_export_handler();
+		CookieConsentLog::register_settings();
                 add_action( 'admin_post_f152_rescan_site', [ __CLASS__, 'handle_rescan_site' ] );
                 add_action( 'wp_ajax_f152_browser_scan_home', [ __CLASS__, 'handle_browser_scan_home' ] );
                 add_action( 'wp_ajax_f152_browser_scan_site', [ __CLASS__, 'handle_browser_scan_site' ] );
@@ -307,6 +308,19 @@ final class Settings {
                         true
                 );
 
+                if ( class_exists( '\F152\FeatureRequest' ) ) {
+                        wp_localize_script(
+                                'f152-admin',
+                                'F152FeatureRequest',
+                                [
+                                        'ajaxUrl'   => admin_url( 'admin-ajax.php' ),
+                                        'action'    => \F152\FeatureRequest::ajax_action(),
+                                        'nonce'     => \F152\FeatureRequest::nonce(),
+                                        'maxLength' => 4000,
+                                ]
+                        );
+                }
+
                 $tab_raw = filter_input( INPUT_GET, 'tab', FILTER_UNSAFE_RAW );
                 $tab     = is_string( $tab_raw ) ? sanitize_key( wp_unslash( $tab_raw ) ) : 'main';
 
@@ -393,7 +407,10 @@ final class Settings {
 					<h1>ФЗ-152 — настройки</h1>
 					<?php self::render_enable_toggle(); ?>
 				</div>
-				<?php self::render_review_cta(); ?>
+				<div class="f152-settings-header__actions">
+					<?php self::render_feature_request_cta(); ?>
+					<?php self::render_review_cta(); ?>
+				</div>
 			</div>
 
 			<?php if ( class_exists( '\\F152\\Survey' ) ) { \F152\Survey::render(); } ?>
@@ -451,6 +468,7 @@ final class Settings {
 				}
 			}
 			?>
+			<?php self::render_feature_request_modal(); ?>
 		</div>
 		<?php
 	}
@@ -1688,62 +1706,91 @@ final class Settings {
 				</div>
 			</section>
 
-			<section class="f152-settings-card">
-				<div class="f152-settings-card__header"><div><span class="f152-card-eyebrow">Дизайн</span><h2>Оформление cookie-баннера</h2><p>Тема, цвета, размеры текста и кнопок. Предпросмотр обновляется при изменении полей.</p></div></div>
+			<section class="f152-settings-card f152-designer-card">
+				<div class="f152-settings-card__header"><div><span class="f152-card-eyebrow">Дизайн</span><h2>Оформление cookie-баннера</h2><p>Настройте внешний вид визуально. Предпросмотр справа обновляется сразу, без сохранения страницы.</p></div></div>
 				<div class="f152-settings-card__body">
-					<div class="f152-appearance-group">
-						<h3>Тема и основные цвета</h3>
-						<div class="f152-grid f152-grid--colors">
-							<div class="f152-field"><label>Тема</label><div class="f152-radio-row"><label><input type="radio" name="f152_theme" value="light" <?php checked( get_option('f152_theme','light') === 'light' ); ?>> Светлая</label><label><input type="radio" name="f152_theme" value="dark" <?php checked( get_option('f152_theme','light') === 'dark' ); ?>> Тёмная</label></div></div>
-							<?php self::render_color_field('f152_color_bg', 'Цвет фона (баннер/попап)', '#ffffff'); ?>
-							<?php self::render_color_field('f152_color_text', 'Цвет текста', '#111111'); ?>
-							<?php self::render_color_field('f152_color_link', 'Цвет ссылок', '#1e73be'); ?>
-						</div>
-					</div>
+					<div class="f152-designer-layout">
+						<div class="f152-designer-controls">
+							<div class="f152-appearance-group f152-appearance-group--position">
+								<div class="f152-appearance-group__heading"><h3>Расположение</h3><span>На сайте</span></div>
+								<?php self::render_position_selector(); ?>
+							</div>
 
-					<div class="f152-appearance-group">
-						<h3>Размеры</h3>
-						<div class="f152-grid">
-							<div class="f152-field"><label for="f152_font_size_text">Размер текста баннера, px</label><input type="number" class="regular-text" id="f152_font_size_text" name="f152_font_size_text" value="<?php echo esc_attr( get_option('f152_font_size_text', '') ); ?>" placeholder="13" min="8" max="32" step="1"><small>Пусто — 13px.</small></div>
-							<div class="f152-field"><label for="f152_font_size_btn">Размер шрифта кнопок, px</label><input type="number" class="regular-text" id="f152_font_size_btn" name="f152_font_size_btn" value="<?php echo esc_attr( get_option('f152_font_size_btn', '') ); ?>" placeholder="14" min="8" max="32" step="1"><small>Пусто — 14px.</small></div>
-							<div class="f152-field"><label for="f152_btn_radius">Скругление кнопок, px</label><input type="number" class="regular-text" id="f152_btn_radius" name="f152_btn_radius" value="<?php echo esc_attr( get_option('f152_btn_radius', '') ); ?>" placeholder="8" min="0" max="32" step="1"><small>Пусто — значение темы.</small></div>
-						</div>
-					</div>
+							<div class="f152-appearance-group">
+								<div class="f152-appearance-group__heading"><h3>Тема и основные цвета</h3><span>Баннер и окно настроек</span></div>
+								<div class="f152-theme-options" role="radiogroup" aria-label="Тема cookie-баннера">
+									<label class="f152-theme-option">
+										<input type="radio" name="f152_theme" value="light" <?php checked( get_option('f152_theme','light') === 'light' ); ?>>
+										<span><i class="f152-theme-option__sample f152-theme-option__sample--light" aria-hidden="true"></i>Светлая</span>
+									</label>
+									<label class="f152-theme-option">
+										<input type="radio" name="f152_theme" value="dark" <?php checked( get_option('f152_theme','light') === 'dark' ); ?>>
+										<span><i class="f152-theme-option__sample f152-theme-option__sample--dark" aria-hidden="true"></i>Тёмная</span>
+									</label>
+								</div>
+								<div class="f152-color-grid f152-color-grid--base">
+									<?php self::render_color_field('f152_color_bg', 'Фон', '#ffffff'); ?>
+									<?php self::render_color_field('f152_color_text', 'Текст', '#111111'); ?>
+									<?php self::render_color_field('f152_color_link', 'Ссылки', '#1e73be'); ?>
+								</div>
+							</div>
 
-					<div class="f152-appearance-group">
-						<h3>Цвета кнопок</h3>
-						<div class="f152-grid f152-grid--colors">
-							<?php self::render_color_field('f152_color_btn_accept_bg', 'Принять — фон', '#27ae60'); ?>
-							<?php self::render_color_field('f152_color_btn_accept_text', 'Принять — текст', '#ffffff'); ?>
-							<?php self::render_color_field('f152_color_btn_settings_bg', 'Настроить — фон', '#f3f4f6', 'Если задать прозрачный цвет или снизить прозрачность до 0%, кнопка станет вторичной с обводкой.'); ?>
-							<?php self::render_color_field('f152_color_btn_settings_text', 'Настроить — текст', '#1e73be'); ?>
-							<?php self::render_color_field('f152_color_btn_reject_bg', 'Отклонить — фон', '#b32424'); ?>
-							<?php self::render_color_field('f152_color_btn_reject_text', 'Отклонить — текст', '#ffffff'); ?>
-						</div>
-					</div>
+							<div class="f152-appearance-group">
+								<div class="f152-appearance-group__heading"><h3>Размеры</h3><span>Компактные значения в px</span></div>
+								<div class="f152-metrics-grid">
+									<?php self::render_compact_number_field('f152_font_size_text', 'Текст баннера', 13, 8, 32); ?>
+									<?php self::render_compact_number_field('f152_font_size_btn', 'Текст кнопок', 14, 8, 32); ?>
+									<?php self::render_compact_number_field('f152_btn_radius', 'Скругление', 8, 0, 32); ?>
+								</div>
+							</div>
 
-					<?php
-					$popup_defaults = [
-						'upper' => \F152\Templates::default_for_option('f152_popup_upper'),
-						'func'  => \F152\Templates::default_for_option('f152_popup_func'),
-						'anal'  => \F152\Templates::default_for_option('f152_popup_anal'),
-						'mark'  => \F152\Templates::default_for_option('f152_popup_mark'),
-					];
-					$theme_mode = self::sanitize_theme_mode( (string) get_option('f152_theme', 'light') );
-					?>
-					<div class="f152-preview" data-f152-preview
-						data-f152-default-banner="<?php echo esc_attr( Helpers::default_banner_text() ); ?>"
-						data-f152-default-upper="<?php echo esc_attr( (string) $popup_defaults['upper'] ); ?>"
-						data-f152-default-func="<?php echo esc_attr( (string) $popup_defaults['func'] ); ?>"
-						data-f152-default-anal="<?php echo esc_attr( (string) $popup_defaults['anal'] ); ?>"
-						data-f152-default-mark="<?php echo esc_attr( (string) $popup_defaults['mark'] ); ?>"
-						data-f152-label-accept="<?php echo esc_attr__( 'Принять', 'fz-152-rf' ); ?>"
-						data-f152-label-settings="<?php echo esc_attr__( 'Настроить', 'fz-152-rf' ); ?>"
-						data-f152-label-reject="<?php echo esc_attr__( 'Отклонить', 'fz-152-rf' ); ?>"
-						data-f152-label-save="<?php echo esc_attr__( 'Сохранить', 'fz-152-rf' ); ?>"
-						data-f152-label-close="<?php echo esc_attr__( 'Закрыть', 'fz-152-rf' ); ?>">
-						<div class="f152-preview__header"><div><strong>Предпросмотр</strong><p class="f152-preview__hint">Обновляется при изменении настроек выше. Мобильный вариант проверяйте на самом сайте.</p></div></div>
-						<div class="f152-preview__frames"><div class="f152-preview__frame" data-f152-preview-frame="desktop"><div class="f152-preview__viewport" data-f152-theme="<?php echo esc_attr( $theme_mode ); ?>"><div class="f152-preview__banner" data-f152-preview-banner></div></div></div></div>
+							<div class="f152-appearance-group">
+								<div class="f152-appearance-group__heading"><h3>Кнопки</h3><span>Фон и текст каждой кнопки</span></div>
+								<div class="f152-button-palette-grid">
+									<div class="f152-button-palette f152-button-palette--accept">
+										<h4>Принять</h4>
+										<?php self::render_color_field('f152_color_btn_accept_bg', 'Фон', '#27ae60'); ?>
+										<?php self::render_color_field('f152_color_btn_accept_text', 'Текст', '#ffffff'); ?>
+									</div>
+									<div class="f152-button-palette f152-button-palette--settings">
+										<h4>Настроить</h4>
+										<?php self::render_color_field('f152_color_btn_settings_bg', 'Фон', '#f3f4f6', '0% прозрачности сделает кнопку вторичной с обводкой.'); ?>
+										<?php self::render_color_field('f152_color_btn_settings_text', 'Текст', '#1e73be'); ?>
+									</div>
+									<div class="f152-button-palette f152-button-palette--reject">
+										<h4>Отклонить</h4>
+										<?php self::render_color_field('f152_color_btn_reject_bg', 'Фон', '#b32424'); ?>
+										<?php self::render_color_field('f152_color_btn_reject_text', 'Текст', '#ffffff'); ?>
+									</div>
+								</div>
+							</div>
+						</div>
+
+						<?php
+						$popup_defaults = [
+							'upper' => \F152\Templates::default_for_option('f152_popup_upper'),
+							'func'  => \F152\Templates::default_for_option('f152_popup_func'),
+							'anal'  => \F152\Templates::default_for_option('f152_popup_anal'),
+							'mark'  => \F152\Templates::default_for_option('f152_popup_mark'),
+						];
+						$theme_mode = self::sanitize_theme_mode( (string) get_option('f152_theme', 'light') );
+						?>
+						<div class="f152-designer-preview-column">
+							<div class="f152-preview" data-f152-preview
+								data-f152-default-banner="<?php echo esc_attr( Helpers::default_banner_text() ); ?>"
+								data-f152-default-upper="<?php echo esc_attr( (string) $popup_defaults['upper'] ); ?>"
+								data-f152-default-func="<?php echo esc_attr( (string) $popup_defaults['func'] ); ?>"
+								data-f152-default-anal="<?php echo esc_attr( (string) $popup_defaults['anal'] ); ?>"
+								data-f152-default-mark="<?php echo esc_attr( (string) $popup_defaults['mark'] ); ?>"
+								data-f152-label-accept="<?php echo esc_attr__( 'Принять', 'fz-152-rf' ); ?>"
+								data-f152-label-settings="<?php echo esc_attr__( 'Настроить', 'fz-152-rf' ); ?>"
+								data-f152-label-reject="<?php echo esc_attr__( 'Отклонить', 'fz-152-rf' ); ?>"
+								data-f152-label-save="<?php echo esc_attr__( 'Сохранить', 'fz-152-rf' ); ?>"
+								data-f152-label-close="<?php echo esc_attr__( 'Закрыть', 'fz-152-rf' ); ?>">
+								<div class="f152-preview__header"><div><strong>Предпросмотр</strong><p class="f152-preview__hint">Нижняя полоса показана внутри миниатюры страницы. На узкой ширине кнопки могут переноситься, как на небольшом экране.</p></div></div>
+								<div class="f152-preview__frames"><div class="f152-preview__frame" data-f152-preview-frame="desktop"><div class="f152-preview__viewport" data-f152-theme="<?php echo esc_attr( $theme_mode ); ?>"><div class="f152-preview__banner" data-f152-preview-banner></div></div></div></div>
+							</div>
+						</div>
 					</div>
 				</div>
 			</section>
@@ -1751,26 +1798,97 @@ final class Settings {
 		<?php
 	}
 
+        private static function render_position_selector() : void {
+                $has_pro = defined( 'F152_PRO_VERSION' );
+                $pro_url = $has_pro
+                        ? self::tab_url( 'integrations' ) . '#f152-pro-designer'
+                        : ( defined( 'F152_PURCHASE_URL' ) ? F152_PURCHASE_URL : 'https://fz152rf.ru/' );
+                $current_mode = 'bar';
+                if ( $has_pro && class_exists( '\F152Pro\BannerDesigner' ) && is_callable( [ '\F152Pro\BannerDesigner', 'get_settings' ] ) ) {
+                        $pro_settings = \F152Pro\BannerDesigner::get_settings();
+                        $candidate = is_array( $pro_settings ) ? (string) ( $pro_settings['mode'] ?? 'bar' ) : 'bar';
+                        if ( in_array( $candidate, [ 'bar', 'card_left', 'card_right' ], true ) ) {
+                                $current_mode = $candidate;
+                        }
+                }
+                ?>
+                <div class="f152-position-picker" aria-label="Расположение cookie-баннера">
+                        <?php if ( $has_pro ) : ?>
+                                <a href="<?php echo esc_url( $pro_url ); ?>" class="f152-position-card f152-position-card--link <?php echo 'bar' === $current_mode ? 'is-selected' : ''; ?>">
+                                        <span class="f152-position-card__visual f152-position-card__visual--bar" aria-hidden="true"><i></i></span>
+                                        <span class="f152-position-card__label">Полоса снизу</span>
+                                        <?php if ( 'bar' === $current_mode ) : ?><span class="f152-position-card__state">Текущее</span><?php endif; ?>
+                                </a>
+                                <a href="<?php echo esc_url( $pro_url ); ?>" class="f152-position-card f152-position-card--link <?php echo 'card_left' === $current_mode ? 'is-selected' : ''; ?>">
+                                        <span class="f152-position-card__visual f152-position-card__visual--left" aria-hidden="true"><i></i></span>
+                                        <span class="f152-position-card__label">Слева снизу</span>
+                                        <span class="f152-pro-badge">PRO</span>
+                                        <?php if ( 'card_left' === $current_mode ) : ?><span class="f152-position-card__state">Текущее</span><?php endif; ?>
+                                </a>
+                                <a href="<?php echo esc_url( $pro_url ); ?>" class="f152-position-card f152-position-card--link <?php echo 'card_right' === $current_mode ? 'is-selected' : ''; ?>">
+                                        <span class="f152-position-card__visual f152-position-card__visual--right" aria-hidden="true"><i></i></span>
+                                        <span class="f152-position-card__label">Справа снизу</span>
+                                        <span class="f152-pro-badge">PRO</span>
+                                        <?php if ( 'card_right' === $current_mode ) : ?><span class="f152-position-card__state">Текущее</span><?php endif; ?>
+                                </a>
+                        <?php else : ?>
+                                <button type="button" class="f152-position-card is-selected" aria-pressed="true">
+                                        <span class="f152-position-card__visual f152-position-card__visual--bar" aria-hidden="true"><i></i></span>
+                                        <span class="f152-position-card__label">Полоса снизу</span>
+                                        <span class="f152-position-card__state">Текущее</span>
+                                </button>
+                                <button type="button" class="f152-position-card is-locked" disabled aria-disabled="true">
+                                        <span class="f152-position-card__visual f152-position-card__visual--left" aria-hidden="true"><i></i></span>
+                                        <span class="f152-position-card__label">Слева снизу</span>
+                                        <span class="f152-pro-badge">PRO</span>
+                                </button>
+                                <button type="button" class="f152-position-card is-locked" disabled aria-disabled="true">
+                                        <span class="f152-position-card__visual f152-position-card__visual--right" aria-hidden="true"><i></i></span>
+                                        <span class="f152-position-card__label">Справа снизу</span>
+                                        <span class="f152-pro-badge">PRO</span>
+                                </button>
+                        <?php endif; ?>
+                </div>
+                <p class="f152-position-picker__note">
+                        <?php if ( $has_pro ) : ?>
+                                <?php echo esc_html__( 'Pro установлен — нажмите на вариант, чтобы открыть полноценные настройки расположения.', 'fz-152-rf' ); ?>
+                        <?php else : ?>
+                                <?php echo esc_html__( 'Карточки слева и справа доступны в Pro.', 'fz-152-rf' ); ?>
+                                <a href="<?php echo esc_url( $pro_url ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html__( 'Подробнее', 'fz-152-rf' ); ?></a>
+                        <?php endif; ?>
+                </p>
+                <?php
+        }
+
+        private static function render_compact_number_field( string $option, string $label, int $placeholder, int $min, int $max ) : void {
+                $value = get_option( $option, '' );
+                ?>
+                <div class="f152-metric-field">
+                        <label for="<?php echo esc_attr( $option ); ?>"><?php echo esc_html( $label ); ?></label>
+                        <div class="f152-metric-field__control">
+                                <input type="number" class="small-text" id="<?php echo esc_attr( $option ); ?>" name="<?php echo esc_attr( $option ); ?>" value="<?php echo esc_attr( $value ); ?>" placeholder="<?php echo esc_attr( (string) $placeholder ); ?>" min="<?php echo esc_attr( (string) $min ); ?>" max="<?php echo esc_attr( (string) $max ); ?>" step="1">
+                                <span>px</span>
+                        </div>
+                </div>
+                <?php
+        }
+
         private static function render_color_field(string $option, string $label, string $placeholder = '', string $description = '') : void {
                 $value = get_option($option, '');
                 $placeholder_value = $placeholder !== '' ? $placeholder : '#000000';
                 $default_color = self::color_picker_fallback($placeholder_value);
+                $picker_value = 'transparent' === $default_color ? '#000000' : $default_color;
                 ?>
-                <div class="f152-field f152-color-field">
+                <div class="f152-color-field">
                         <label for="<?php echo esc_attr($option); ?>"><?php echo esc_html($label); ?></label>
                         <div class="f152-color-control" data-f152-color-default="<?php echo esc_attr($default_color); ?>">
                                 <div class="f152-color-control__row">
-                                        <input type="text" class="regular-text f152-color-input" id="<?php echo esc_attr($option); ?>" name="<?php echo esc_attr($option); ?>" value="<?php echo esc_attr( $value ); ?>" placeholder="<?php echo esc_attr($placeholder_value); ?>">
-                                        <button type="button" class="button f152-color-button" aria-label="Открыть палитру">
-                                                <span class="dashicons dashicons-art" aria-hidden="true"></span>
-                                        </button>
-                                        <input type="color" class="f152-color-picker" value="#000000" aria-hidden="true">
-                                </div>
-                                <div class="f152-color-opacity">
-                                        <label>
-                                                <span class="f152-opacity__label">Прозрачность: <output class="f152-opacity__value" aria-live="polite">100%</output></span>
-                                                <input type="range" min="0" max="100" step="1" value="100" class="f152-opacity__range">
-                                        </label>
+                                        <input type="color" class="f152-color-picker" value="<?php echo esc_attr( $picker_value ); ?>" aria-label="<?php echo esc_attr( sprintf( 'Выбрать цвет: %s', $label ) ); ?>">
+                                        <input type="text" class="f152-color-input code" id="<?php echo esc_attr($option); ?>" name="<?php echo esc_attr($option); ?>" value="<?php echo esc_attr( $value ); ?>" placeholder="<?php echo esc_attr($placeholder_value); ?>" spellcheck="false" autocomplete="off">
+                                        <div class="f152-color-opacity" title="Прозрачность">
+                                                <input type="range" min="0" max="100" step="1" value="100" class="f152-opacity__range" aria-label="Прозрачность">
+                                                <output class="f152-opacity__value" aria-live="polite">100%</output>
+                                        </div>
                                 </div>
                         </div>
                         <?php if ( $description !== '' ) : ?>
@@ -1782,7 +1900,11 @@ final class Settings {
 
         private static function color_picker_fallback(string $placeholder) : string {
                 if ( preg_match('/#([0-9a-fA-F]{3}){1,2}/', $placeholder, $m) ) {
-                        return $m[0];
+                        $hex = $m[0];
+                        if ( 4 === strlen( $hex ) ) {
+                                return '#' . $hex[1] . $hex[1] . $hex[2] . $hex[2] . $hex[3] . $hex[3];
+                        }
+                        return $hex;
                 }
 
                 if ( stripos($placeholder, 'transparent') !== false ) {
@@ -1791,7 +1913,7 @@ final class Settings {
 
                 return '#000000';
         }
-		
+
 	private static function render_tab_texts() : void {
 		$map = [
 			'policy_pd'         => ['opt' => 'f152_text_policy_pd',        'label' => 'Политика обработки ПД',         'full' => 'Политика обработки персональных данных'],
@@ -2324,6 +2446,52 @@ final class Settings {
 		<?php
 	}
 
+		private static function render_feature_request_cta() : void {
+			?>
+			<aside class="f152-feature-cta" aria-label="<?php echo esc_attr__( 'Предложить функцию для FZ-152 RF', 'fz-152-rf' ); ?>">
+				<span class="dashicons dashicons-lightbulb f152-feature-cta__icon" aria-hidden="true"></span>
+				<div class="f152-feature-cta__copy">
+					<strong><?php echo esc_html__( 'Не хватает функции?', 'fz-152-rf' ); ?></strong>
+					<span><?php echo esc_html__( 'Расскажите разработчику.', 'fz-152-rf' ); ?></span>
+				</div>
+				<button type="button" class="button f152-feature-cta__button" data-f152-feature-open>
+					<?php echo esc_html__( 'Предложить функцию', 'fz-152-rf' ); ?>
+				</button>
+			</aside>
+			<?php
+		}
+
+		private static function render_feature_request_modal() : void {
+			?>
+			<div class="f152-feature-modal" data-f152-feature-modal hidden>
+				<div class="f152-feature-modal__backdrop" data-f152-feature-close></div>
+				<div class="f152-feature-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="f152-feature-title">
+					<button type="button" class="f152-feature-modal__close" data-f152-feature-close aria-label="<?php echo esc_attr__( 'Закрыть', 'fz-152-rf' ); ?>">×</button>
+					<div class="f152-feature-modal__heading">
+						<span class="dashicons dashicons-lightbulb" aria-hidden="true"></span>
+						<div>
+							<h2 id="f152-feature-title"><?php echo esc_html__( 'Предложить новую функцию', 'fz-152-rf' ); ?></h2>
+							<p><?php echo esc_html__( 'Опишите, чего вам не хватает в FZ-152 RF или какую задачу плагин мог бы решать удобнее.', 'fz-152-rf' ); ?></p>
+						</div>
+					</div>
+					<label class="screen-reader-text" for="f152-feature-message"><?php echo esc_html__( 'Описание функции', 'fz-152-rf' ); ?></label>
+					<textarea id="f152-feature-message" class="large-text f152-feature-modal__textarea" rows="7" maxlength="4000" data-f152-feature-message placeholder="<?php echo esc_attr__( 'Например: хотелось бы, чтобы плагин...', 'fz-152-rf' ); ?>"></textarea>
+					<div class="f152-feature-modal__meta">
+						<span><?php echo esc_html__( 'Не отправляйте пароли, ключи и другие секретные данные.', 'fz-152-rf' ); ?></span>
+						<span data-f152-feature-counter>0 / 4000</span>
+					</div>
+					<div class="f152-feature-modal__footer">
+						<span class="f152-feature-modal__status" data-f152-feature-status aria-live="polite"></span>
+						<div class="f152-feature-modal__actions">
+							<button type="button" class="button" data-f152-feature-close><?php echo esc_html__( 'Отмена', 'fz-152-rf' ); ?></button>
+							<button type="button" class="button button-primary" data-f152-feature-submit><?php echo esc_html__( 'Отправить', 'fz-152-rf' ); ?></button>
+						</div>
+					</div>
+				</div>
+			</div>
+			<?php
+		}
+
 		private static function render_review_cta() : void {
 			$reviews_url = 'https://wordpress.org/support/plugin/fz-152-rf/reviews/#new-post';
 			?>
@@ -2469,6 +2637,7 @@ final class Settings {
   	add_action('admin_action_f152_clear_logs', [__CLASS__, 'handle_clear_logs']);
 	add_action('admin_post_f152_clear_logs', [__CLASS__, 'handle_clear_logs']);
 	add_action('admin_post_f152_log_cleanup_password', [__CLASS__, 'handle_log_cleanup_password']);
+	add_action('admin_post_f152_export_cookie_csv', [__CLASS__, 'handle_cookie_csv_export']);
 	add_action('admin_post_f152_capture_policy_snapshot', [__CLASS__, 'handle_capture_policy_snapshot']);
   	add_action('admin_action_f152_create_pages', [__CLASS__, 'handle_create_pages']);
   	add_action('admin_post_f152_replace_configured_pages', [__CLASS__, 'handle_replace_configured_pages']);
@@ -2708,6 +2877,54 @@ final class Settings {
  	exit;
  }
 
+ public static function handle_cookie_csv_export(): void {
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_die( 'Недостаточно прав для выполнения операции.' );
+	}
+	check_admin_referer( 'f152_export_cookie_csv', 'f152_cookie_export_nonce' );
+	if ( ! CookieConsentLog::table_exists() ) {
+		wp_die( 'Таблица cookie-журнала недоступна.' );
+	}
+	while ( ob_get_level() > 0 ) {
+		ob_end_clean();
+	}
+	nocache_headers();
+	header( 'Content-Type: text/csv; charset=utf-8' );
+	header( 'Content-Disposition: attachment; filename="fz-152-cookie-consent-log-' . gmdate( 'Y-m-d' ) . '.csv"' );
+	$output = fopen( 'php://output', 'w' );
+	if ( false === $output ) {
+		wp_die( 'Не удалось открыть поток экспорта.' );
+	}
+	echo "\xEF\xBB\xBF";  
+	self::write_cookie_csv( $output );
+	exit;
+ }
+
+  
+ public static function write_cookie_csv( $output ): void {
+	fputcsv( $output, [ 'id', 'event_id', 'created_at', 'created_at_utc', 'timezone', 'action', 'source', 'necessary', 'analytics', 'marketing', 'categories_json', 'page_url', 'ip_address', 'browser', 'user_agent', 'policy_version', 'policy_url' ], ';', '"', '' );
+	$max_id = CookieConsentLog::get_export_max_id();
+	$after_id = 0;
+	while ( $after_id < $max_id ) {
+		$rows = CookieConsentLog::get_export_batch( $after_id, $max_id );
+		if ( empty( $rows ) ) {
+			break;
+		}
+		foreach ( $rows as $row ) {
+			$ua = (string) ( $row['user_agent'] ?? '' );
+			$csv_row = [
+				$row['id'], $row['event_id'], CookieConsentLog::local_datetime( $row['created_at_utc'] ),
+				$row['created_at_utc'], wp_timezone()->getName(), $row['action'], $row['source'],
+				$row['necessary'], $row['analytics'], $row['marketing'], $row['categories_json'],
+				$row['page_url'], $row['ip_address'], CookieConsentLog::browser_name( $ua ), $ua,
+				$row['policy_version'], $row['policy_url'],
+			];
+			fputcsv( $output, array_map( [ __CLASS__, 'csv_safe_cell' ], $csv_row ), ';', '"', '' );
+			$after_id = (int) $row['id'];
+		}
+	}
+ }
+
  public static function handle_clear_logs(): void {
  	if ( ! current_user_can('manage_options') ) {
  		wp_die('Недостаточно прав для выполнения операции.');
@@ -2716,27 +2933,44 @@ final class Settings {
  	check_admin_referer( 'f152_clear_logs', 'f152_clear_nonce' );
  	$date_raw = filter_input( INPUT_POST, 'f152_clear_until', FILTER_UNSAFE_RAW );
  	$password_raw = filter_input( INPUT_POST, 'f152_clear_password', FILTER_UNSAFE_RAW );
+	$target_raw = filter_input( INPUT_POST, 'f152_clear_target', FILTER_UNSAFE_RAW );
+	$return_raw = filter_input( INPUT_POST, 'log_type', FILTER_UNSAFE_RAW );
+	$target = null === $target_raw ? 'forms' : ( is_string( $target_raw ) ? sanitize_key( wp_unslash( $target_raw ) ) : '' );
+	$return_type = 'cookie' === $return_raw ? 'cookie' : 'forms';
+	$redirect = [ 'page' => 'f152', 'tab' => 'logs', 'log_type' => $return_type ];
  	$date = is_string( $date_raw ) ? sanitize_text_field( wp_unslash( $date_raw ) ) : '';
  	$password = is_string( $password_raw ) ? wp_unslash( $password_raw ) : '';
  	$hash = (string) get_option( 'f152_log_cleanup_password_hash', '' );
 
  	if ( '' === $hash || '' === $password || ! wp_check_password( $password, $hash ) ) {
- 		wp_safe_redirect( add_query_arg( [ 'page' => 'f152', 'tab' => 'logs', 'f152_log_error' => 'password' ], admin_url( 'options-general.php' ) ) );
+		wp_safe_redirect( add_query_arg( $redirect + [ 'f152_log_error' => 'password' ], admin_url( 'options-general.php' ) ) );
  		exit;
  	}
 
- 	$deleted = class_exists( '\F152\ConsentLog' ) ? \F152\ConsentLog::delete_through_date( $date ) : false;
- 	if ( false === $deleted ) {
- 		wp_safe_redirect( add_query_arg( [ 'page' => 'f152', 'tab' => 'logs', 'f152_log_error' => 'date' ], admin_url( 'options-general.php' ) ) );
+	if ( ! in_array( $target, [ 'forms', 'cookie', 'both' ], true ) || null === CookieConsentLog::cleanup_cutoff_utc( $date ) ) {
+		wp_safe_redirect( add_query_arg( $redirect + [ 'f152_log_error' => 'date' ], admin_url( 'options-general.php' ) ) );
+		exit;
+	}
+	$clear_forms = in_array( $target, [ 'forms', 'both' ], true );
+	$clear_cookie = in_array( $target, [ 'cookie', 'both' ], true );
+	 
+	if ( ( $clear_forms && ! ConsentLog::table_exists() ) || ( $clear_cookie && ! CookieConsentLog::table_exists() ) ) {
+		wp_safe_redirect( add_query_arg( $redirect + [ 'f152_log_error' => 'delete' ], admin_url( 'options-general.php' ) ) );
  		exit;
  	}
-
- 	wp_safe_redirect( add_query_arg( [
- 		'page' => 'f152',
- 		'tab' => 'logs',
- 		'f152_cleared_count' => (int) $deleted,
- 		'f152_cleared_date' => $date,
- 	], admin_url( 'options-general.php' ) ) );
+	$redirect['f152_cleared_date'] = $date;
+	foreach ( [ 'forms' => $clear_forms, 'cookie' => $clear_cookie ] as $type => $selected ) {
+		if ( ! $selected ) {
+			continue;
+		}
+		$deleted = 'forms' === $type ? ConsentLog::delete_through_date( $date ) : CookieConsentLog::delete_through_date( $date );
+		if ( false === $deleted ) {
+			$redirect['f152_log_error'] = 'delete';
+			break;
+		}
+		$redirect[ 'f152_cleared_' . $type ] = $deleted;
+	}
+	wp_safe_redirect( add_query_arg( $redirect, admin_url( 'options-general.php' ) ) );
  	exit;
  }
 
@@ -2765,7 +2999,8 @@ final class Settings {
  		update_option( 'f152_log_cleanup_password_hash', wp_hash_password( $new ), false );
  	}
 
- 	wp_safe_redirect( add_query_arg( [ 'page' => 'f152', 'tab' => 'logs', 'f152_log_password' => $status ], admin_url( 'options-general.php' ) ) );
+	$return_raw = filter_input( INPUT_POST, 'log_type', FILTER_UNSAFE_RAW );
+	wp_safe_redirect( add_query_arg( [ 'page' => 'f152', 'tab' => 'logs', 'log_type' => 'cookie' === $return_raw ? 'cookie' : 'forms', 'f152_log_password' => $status ], admin_url( 'options-general.php' ) ) );
  	exit;
  }
 
@@ -3521,6 +3756,176 @@ final class Settings {
  	}
 
  private static function render_tab_logs(): void {
+    $type_raw = filter_input( INPUT_GET, 'log_type', FILTER_UNSAFE_RAW );
+    $log_type = 'cookie' === $type_raw ? 'cookie' : 'forms';
+    ?>
+    <h2>Журнал согласий</h2>
+    <nav class="f152-log-subtabs" aria-label="Журналы согласий">
+        <a href="<?php echo esc_url( add_query_arg( 'log_type', 'forms', self::tab_url( 'logs' ) ) ); ?>" class="<?php echo esc_attr( 'forms' === $log_type ? 'is-active' : '' ); ?>" <?php if ( 'forms' === $log_type ) echo 'aria-current="page"'; ?>>Формы</a>
+        <a href="<?php echo esc_url( add_query_arg( 'log_type', 'cookie', self::tab_url( 'logs' ) ) ); ?>" class="<?php echo esc_attr( 'cookie' === $log_type ? 'is-active' : '' ); ?>" <?php if ( 'cookie' === $log_type ) echo 'aria-current="page"'; ?>>Cookie-баннер</a>
+    </nav>
+    <?php
+    self::render_log_notices();
+    if ( 'cookie' === $log_type ) {
+        self::render_cookie_logs();
+    } else {
+        self::render_form_logs();
+    }
+ }
+
+ private static function render_log_notices(): void {
+    foreach ( [ 'forms' => 'журнала форм', 'cookie' => 'cookie-журнала' ] as $type => $label ) {
+        $raw = filter_input( INPUT_GET, 'f152_cleared_' . $type, FILTER_UNSAFE_RAW );
+        if ( is_string( $raw ) && ctype_digit( $raw ) ) {
+            echo '<div class="notice notice-success is-dismissible"><p>' . esc_html( sprintf( 'Удалено из %s: %d.', $label, (int) $raw ) ) . '</p></div>';
+        }
+    }
+     
+    $legacy = filter_input( INPUT_GET, 'f152_cleared_count', FILTER_UNSAFE_RAW );
+    if ( is_string( $legacy ) && ctype_digit( $legacy ) ) {
+        echo '<div class="notice notice-success is-dismissible"><p>' . esc_html( sprintf( 'Удалено из журнала форм: %d.', (int) $legacy ) ) . '</p></div>';
+    }
+    $error_raw = filter_input( INPUT_GET, 'f152_log_error', FILTER_UNSAFE_RAW );
+    $error = is_string( $error_raw ) ? sanitize_key( $error_raw ) : '';
+    $errors = [
+        'password' => 'Неверный пароль защиты очистки журнала.',
+        'date' => 'Проверьте выбранный журнал и дату очистки.',
+        'delete' => 'Не удалось завершить очистку. Проверьте доступность таблиц. Выполненные удаления показаны отдельно.',
+    ];
+    if ( isset( $errors[ $error ] ) ) {
+        echo '<div class="notice notice-error is-dismissible"><p>' . esc_html( $errors[ $error ] ) . '</p></div>';
+    }
+    $status_raw = filter_input( INPUT_GET, 'f152_log_password', FILTER_UNSAFE_RAW );
+    $status = is_string( $status_raw ) ? sanitize_key( $status_raw ) : '';
+    $messages = [ 'updated' => 'Пароль защиты очистки журнала сохранён.', 'current' => 'Текущий пароль указан неверно.', 'short' => 'Новый пароль должен содержать не менее 8 символов.', 'confirm' => 'Новый пароль и подтверждение не совпадают.' ];
+    if ( isset( $messages[ $status ] ) ) {
+        echo '<div class="notice notice-' . esc_attr( 'updated' === $status ? 'success' : 'error' ) . ' is-dismissible"><p>' . esc_html( $messages[ $status ] ) . '</p></div>';
+    }
+ }
+
+ private static function render_cookie_logs(): void {
+    $ready = CookieConsentLog::maybe_upgrade();
+    $enabled = (bool) get_option( 'f152_cookie_log_enabled', 0 );
+    $retention = CookieConsentLog::sanitize_retention_days( get_option( 'f152_cookie_log_retention_days', 365 ) );
+    $paged_raw = filter_input( INPUT_GET, 'paged', FILTER_UNSAFE_RAW );
+    $paged = is_string( $paged_raw ) ? max( 1, (int) $paged_raw ) : 1;
+    $total = $ready ? CookieConsentLog::get_total_count() : 0;
+    $total_pages = (int) ceil( $total / 50 );
+    $paged = min( $paged, max( 1, $total_pages ) );
+    $logs = $ready ? CookieConsentLog::get_logs( $paged, 50 ) : [];
+    $size = $ready ? CookieConsentLog::get_table_size() : null;
+    $export_url = add_query_arg( [ 'action' => 'f152_export_cookie_csv', 'f152_cookie_export_nonce' => wp_create_nonce( 'f152_export_cookie_csv' ) ], admin_url( 'admin-post.php' ) );
+    $actions = [ 'accept_all' => 'Принял всё', 'reject_optional' => 'Отклонил необязательные', 'save_preferences' => 'Сохранил настройки', 'grant_category' => 'Разрешил категорию' ];
+    $sources = [ 'banner' => 'Баннер', 'preferences' => 'Настройки cookie', 'embed' => 'Заблокированный контент', 'api' => 'API' ];
+    settings_errors();
+    ?>
+    <div class="f152-logs-wrap">
+        <form method="post" action="options.php" class="f152-settings-card f152-cookie-log-settings">
+            <?php settings_fields( 'f152_cookie_log' ); ?>
+            <div class="f152-settings-card__header"><h2>Журнал cookie-баннера</h2></div>
+            <div class="f152-settings-card__body">
+                <p><input type="hidden" name="f152_cookie_log_enabled" value="0"><label><input type="checkbox" name="f152_cookie_log_enabled" value="1" <?php checked( $enabled ); ?>> <strong>Вести журнал действий с cookie-баннером</strong></label></p>
+                <p>При включении журнал будет сохранять явные решения посетителей в cookie-баннере: принятие, отказ и выбранные категории. Посетители, которые не взаимодействовали с баннером, в журнал не записываются.</p>
+                <div class="notice notice-warning inline"><p>На сайтах с высокой посещаемостью журнал может заметно увеличивать размер базы данных. IP-адрес и User-Agent могут относиться к данным посетителя. Используйте необходимый срок хранения и убедитесь, что такая обработка отражена в документах сайта.</p></div>
+                <p><input type="hidden" name="f152_cookie_log_capture_ip" value="0"><label><input type="checkbox" name="f152_cookie_log_capture_ip" value="1" <?php checked( get_option( 'f152_cookie_log_capture_ip', 1 ), 1 ); ?>> Сохранять IP-адрес</label></p>
+                <p><input type="hidden" name="f152_cookie_log_capture_user_agent" value="0"><label><input type="checkbox" name="f152_cookie_log_capture_user_agent" value="1" <?php checked( get_option( 'f152_cookie_log_capture_user_agent', 1 ), 1 ); ?>> Сохранять User-Agent</label></p>
+                <p><label for="f152_cookie_log_retention_days"><strong>Срок хранения</strong></label><br>
+                    <select name="f152_cookie_log_retention_days" id="f152_cookie_log_retention_days">
+                        <?php foreach ( [ 30 => '30 дней', 90 => '90 дней', 180 => '180 дней', 365 => '365 дней', 730 => '730 дней', 0 => 'Бессрочно' ] as $days => $label ) : ?>
+                            <option value="<?php echo esc_attr( $days ); ?>" <?php selected( $retention, $days ); ?>><?php echo esc_html( $label ); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </p>
+                <p class="description">Автоматическая очистка выполняется раз в сутки через WP-Cron, в том числе при выключенном журнале. Выключение IP и User-Agent влияет на новые записи.</p>
+                <?php submit_button( 'Сохранить настройки журнала', 'primary', 'submit', false ); ?>
+                <p class="description">При включении или выключении журнала плагин очищает кэш WP Rocket. Если используете другой кэш страниц или CDN, очистите его после сохранения.</p>
+            </div>
+        </form>
+        <?php if ( ! $enabled ) : ?>
+            <div class="notice notice-info inline"><p>Журнал cookie-баннера выключен. Плагин продолжает хранить выбор посетителя в cookie и вести существующую агрегированную статистику баннера, но индивидуальные действия посетителей не записываются.</p></div>
+        <?php endif; ?>
+        <?php if ( ! $ready ) : ?>
+            <div class="notice notice-error"><p>Не удалось создать таблицу cookie-журнала. Проверьте права доступа к базе данных.</p></div>
+        <?php else : ?>
+            <p><strong>Записей: <?php echo esc_html( number_format_i18n( $total ) ); ?></strong><?php if ( null !== $size ) : ?> · размер таблицы: ~<?php echo esc_html( size_format( $size, 1 ) ); ?><?php endif; ?></p>
+            <p class="description">Дата и время показаны в часовом поясе WordPress: <?php echo esc_html( wp_timezone()->getName() ); ?>. В CSV также сохранено время UTC.</p>
+            <div class="f152-log-actions"><a href="<?php echo esc_url( $export_url ); ?>" class="button f152-log-actions__export">Экспорт cookie-журнала в CSV</a></div>
+            <?php self::render_log_cleanup( 'cookie' ); ?>
+            <?php if ( empty( $logs ) ) : ?>
+                <p>Записей пока нет. После включения журнала здесь появятся новые решения посетителей.</p>
+            <?php else : ?>
+                <div class="f152-log-table-card">
+                    <table class="widefat f152-log-table f152-cookie-log-table">
+                        <thead><tr><th>Дата и время</th><th>Действие</th><th>Выбор</th><th>Источник</th><th>Страница</th><th>IP</th><th>Браузер / User-Agent</th><th>Версия политики</th></tr></thead>
+                        <tbody>
+                        <?php foreach ( $logs as $row ) : ?>
+                            <?php $ua = (string) ( $row['user_agent'] ?? '' ); $url = (string) ( $row['page_url'] ?? '' ); ?>
+                            <tr>
+                                <td><?php echo esc_html( CookieConsentLog::local_datetime( $row['created_at_utc'] ) ); ?><br><small class="description">ID: <?php echo esc_html( $row['id'] ); ?></small></td>
+                                <td><?php echo esc_html( $actions[ $row['action'] ] ?? $row['action'] ); ?></td>
+                                <td class="f152-cookie-log-table__choice">Обязательные: да<br>Аналитические: <?php echo $row['analytics'] ? 'да' : 'нет'; ?><br>Маркетинговые: <?php echo $row['marketing'] ? 'да' : 'нет'; ?></td>
+                                <td><?php echo esc_html( $sources[ $row['source'] ] ?? $row['source'] ); ?></td>
+                                <td class="f152-cookie-log-table__page"><?php if ( '' !== $url ) : ?><a href="<?php echo esc_url( $url ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html( $url ); ?></a><?php else : ?>&mdash;<?php endif; ?></td>
+                                <td><?php echo esc_html( $row['ip_address'] ?? '—' ); ?></td>
+                                <td class="f152-cookie-log-table__ua"><?php if ( '' !== $ua ) : ?><?php echo esc_html( CookieConsentLog::browser_name( $ua ) ); ?><details><summary>User-Agent</summary><small><?php echo esc_html( $ua ); ?></small></details><?php else : ?>&mdash;<?php endif; ?></td>
+                                <td><?php echo esc_html( $row['policy_version'] ?? '—' ); ?><?php if ( ! empty( $row['policy_url'] ) ) : ?><br><a href="<?php echo esc_url( $row['policy_url'] ); ?>" target="_blank" rel="noopener noreferrer">Политика cookie</a><?php endif; ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+                <?php if ( $total_pages > 1 ) : ?>
+                    <div class="tablenav bottom"><div class="tablenav-pages"><?php echo wp_kses_post( paginate_links( [ 'base' => add_query_arg( 'paged', '%#%', add_query_arg( 'log_type', 'cookie', self::tab_url( 'logs' ) ) ), 'format' => '', 'prev_text' => '&laquo;', 'next_text' => '&raquo;', 'total' => $total_pages, 'current' => $paged ] ) ); ?></div></div>
+                <?php endif; ?>
+            <?php endif; ?>
+        <?php endif; ?>
+    </div>
+    <?php
+ }
+
+ private static function render_log_cleanup( string $log_type ): void {
+    $cleanup_hash = (string) get_option( 'f152_log_cleanup_password_hash', '' );
+    ?>
+			<details class="f152-settings-card" style="margin:16px 0;">
+				<summary style="cursor:pointer;padding:16px 20px;"><strong>Защищённая очистка журналов</strong></summary>
+				<div style="padding:0 20px 20px;">
+					<p>Выберите журнал и дату. Будут удалены только записи выбранного журнала по эту дату включительно, в часовом поясе WordPress.</p>
+					<?php if ( '' === $cleanup_hash ) : ?>
+						<p><strong>Сначала задайте отдельный пароль очистки.</strong> Он не совпадает с паролем WordPress и хранится только в виде хэша.</p>
+					<?php else : ?>
+						<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" onsubmit="return confirm('Удалить записи журнала до выбранной даты включительно? Это действие необратимо.');" style="margin-bottom:20px;">
+							<input type="hidden" name="action" value="f152_clear_logs">
+                            <input type="hidden" name="log_type" value="<?php echo esc_attr( $log_type ); ?>">
+                            <p><label><strong>Что очищать</strong><br><select name="f152_clear_target" required>
+                                <option value="forms" <?php selected( $log_type, 'forms' ); ?>>Журнал форм</option>
+                                <option value="cookie" <?php selected( $log_type, 'cookie' ); ?>>Cookie-журнал</option>
+                                <option value="both">Оба журнала</option>
+                            </select></label></p>
+							<?php wp_nonce_field( 'f152_clear_logs', 'f152_clear_nonce' ); ?>
+							<p><label><strong>Удалить записи по дату включительно</strong><br><input type="date" name="f152_clear_until" max="<?php echo esc_attr( current_time( 'Y-m-d' ) ); ?>" required></label></p>
+							<p><label><strong>Пароль очистки</strong><br><input type="password" name="f152_clear_password" autocomplete="current-password" required></label></p>
+							<?php submit_button( 'Удалить выбранный период', 'delete', 'submit', false ); ?>
+						</form>
+					<?php endif; ?>
+
+					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+						<input type="hidden" name="action" value="f152_log_cleanup_password">
+                        <input type="hidden" name="log_type" value="<?php echo esc_attr( $log_type ); ?>">
+						<?php wp_nonce_field( 'f152_log_cleanup_password', 'f152_log_password_nonce' ); ?>
+						<?php if ( '' !== $cleanup_hash ) : ?>
+							<p><label><strong>Текущий пароль</strong><br><input type="password" name="f152_current_cleanup_password" autocomplete="current-password" required></label></p>
+						<?php endif; ?>
+						<p><label><strong><?php echo esc_html( '' === $cleanup_hash ? 'Новый пароль очистки' : 'Новый пароль' ); ?></strong><br><input type="password" name="f152_new_cleanup_password" minlength="8" autocomplete="new-password" required></label></p>
+						<p><label><strong>Повторите пароль</strong><br><input type="password" name="f152_confirm_cleanup_password" minlength="8" autocomplete="new-password" required></label></p>
+						<?php submit_button( '' === $cleanup_hash ? 'Задать пароль защиты' : 'Изменить пароль защиты', 'secondary', 'submit', false ); ?>
+					</form>
+					<p class="description">Защита предотвращает случайную или намеренную очистку через интерфейс FZ-152 без отдельного пароля. Пользователь с полным доступом к серверу или базе данных технически может обойти защиту.</p>
+				</div>
+			</details>
+    <?php
+ }
+
+ private static function render_form_logs(): void {
  	$table_ready = false;
  	if ( class_exists('\\F152\\ConsentLog') ) {
  		$table_ready = \F152\ConsentLog::maybe_create_table();
@@ -3577,13 +3982,12 @@ final class Settings {
  			'f152_export_nonce' => wp_create_nonce('f152_export_csv'),
  		], admin_url('admin.php'));
 
- 	$cleanup_hash = (string) get_option( 'f152_log_cleanup_password_hash', '' );
  	?>
  	<div class="f152-logs-wrap">
- 		<h2>Журнал согласий</h2>
+		<h3>Журнал форм</h3>
 		<div class="f152-onboarding__notice">
 			<h3>Что попадает в журнал</h3>
-			<p>В журнал не записываются принятия или отказы от cookie. Здесь сохраняются согласия на обработку персональных данных, согласия на рассылку и произвольные подтверждения из поддерживаемых форм. Для необязательного произвольного подтверждения фиксируется и ответ «Да», и ответ «Нет».</p>
+			<p>Решения по cookie находятся в соседней вкладке «Cookie-баннер». Здесь сохраняются согласия на обработку персональных данных, согласия на рассылку и произвольные подтверждения из поддерживаемых форм. Для необязательного произвольного подтверждения фиксируется и ответ «Да», и ответ «Нет».</p>
 		</div>
 
  		<?php if ( ! $table_ready ) : ?>
@@ -3591,61 +3995,11 @@ final class Settings {
  				<p>Не удалось создать таблицу логов. Обратитесь к администратору сайта.</p>
  			</div>
  		<?php else : ?>
- 			<?php
- 			$cleared_count_raw = filter_input( INPUT_GET, 'f152_cleared_count', FILTER_UNSAFE_RAW );
- 			$cleared_date_raw = filter_input( INPUT_GET, 'f152_cleared_date', FILTER_UNSAFE_RAW );
- 			$log_error_raw = filter_input( INPUT_GET, 'f152_log_error', FILTER_UNSAFE_RAW );
- 			$password_status_raw = filter_input( INPUT_GET, 'f152_log_password', FILTER_UNSAFE_RAW );
- 			$cleared_count = is_string( $cleared_count_raw ) ? max( 0, (int) sanitize_text_field( wp_unslash( $cleared_count_raw ) ) ) : -1;
- 			$cleared_date = is_string( $cleared_date_raw ) ? sanitize_text_field( wp_unslash( $cleared_date_raw ) ) : '';
- 			$log_error = is_string( $log_error_raw ) ? sanitize_key( wp_unslash( $log_error_raw ) ) : '';
- 			$password_status = is_string( $password_status_raw ) ? sanitize_key( wp_unslash( $password_status_raw ) ) : '';
- 			if ( $cleared_count >= 0 ) : ?>
- 				<div class="notice notice-success is-dismissible"><p><?php echo esc_html( sprintf( 'Удалено записей по %s включительно: %d.', $cleared_date, $cleared_count ) ); ?></p></div>
- 			<?php elseif ( 'password' === $log_error ) : ?>
- 				<div class="notice notice-error is-dismissible"><p>Неверный пароль защиты очистки журнала.</p></div>
- 			<?php elseif ( 'date' === $log_error ) : ?>
- 				<div class="notice notice-error is-dismissible"><p>Не удалось удалить записи. Проверьте дату.</p></div>
- 			<?php endif; ?>
- 			<?php if ( 'updated' === $password_status ) : ?>
- 				<div class="notice notice-success is-dismissible"><p>Пароль защиты очистки журнала сохранён.</p></div>
- 			<?php elseif ( in_array( $password_status, [ 'current', 'short', 'confirm' ], true ) ) : ?>
- 				<div class="notice notice-error is-dismissible"><p><?php echo esc_html( 'current' === $password_status ? 'Текущий пароль указан неверно.' : ( 'short' === $password_status ? 'Новый пароль должен содержать не менее 8 символов.' : 'Новый пароль и подтверждение не совпадают.' ) ); ?></p></div>
- 			<?php endif; ?>
-
  			<div class="f152-log-actions">
  				<a href="<?php echo esc_url($export_url); ?>" class="button f152-log-actions__export">Экспорт в CSV</a>
  			</div>
 
-			<details class="f152-settings-card" style="margin:16px 0;">
-				<summary style="cursor:pointer;padding:16px 20px;"><strong>Защищённая очистка журнала</strong></summary>
-				<div style="padding:0 20px 20px;">
-					<p>Очистка больше не удаляет весь журнал одной кнопкой. Укажите дату, и будут удалены только записи до этой даты включительно.</p>
-					<?php if ( '' === $cleanup_hash ) : ?>
-						<p><strong>Сначала задайте отдельный пароль очистки.</strong> Он не совпадает с паролем WordPress и хранится только в виде хэша.</p>
-					<?php else : ?>
-						<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" onsubmit="return confirm('Удалить записи журнала до выбранной даты включительно? Это действие необратимо.');" style="margin-bottom:20px;">
-							<input type="hidden" name="action" value="f152_clear_logs">
-							<?php wp_nonce_field( 'f152_clear_logs', 'f152_clear_nonce' ); ?>
-							<p><label><strong>Удалить записи по дату включительно</strong><br><input type="date" name="f152_clear_until" max="<?php echo esc_attr( current_time( 'Y-m-d' ) ); ?>" required></label></p>
-							<p><label><strong>Пароль очистки</strong><br><input type="password" name="f152_clear_password" autocomplete="current-password" required></label></p>
-							<?php submit_button( 'Удалить выбранный период', 'delete', 'submit', false ); ?>
-						</form>
-					<?php endif; ?>
-
-					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
-						<input type="hidden" name="action" value="f152_log_cleanup_password">
-						<?php wp_nonce_field( 'f152_log_cleanup_password', 'f152_log_password_nonce' ); ?>
-						<?php if ( '' !== $cleanup_hash ) : ?>
-							<p><label><strong>Текущий пароль</strong><br><input type="password" name="f152_current_cleanup_password" autocomplete="current-password" required></label></p>
-						<?php endif; ?>
-						<p><label><strong><?php echo esc_html( '' === $cleanup_hash ? 'Новый пароль очистки' : 'Новый пароль' ); ?></strong><br><input type="password" name="f152_new_cleanup_password" minlength="8" autocomplete="new-password" required></label></p>
-						<p><label><strong>Повторите пароль</strong><br><input type="password" name="f152_confirm_cleanup_password" minlength="8" autocomplete="new-password" required></label></p>
-						<?php submit_button( '' === $cleanup_hash ? 'Задать пароль защиты' : 'Изменить пароль защиты', 'secondary', 'submit', false ); ?>
-					</form>
-					<p class="description">Защита предотвращает случайную или намеренную очистку через интерфейс FZ-152 без отдельного пароля. Пользователь с полным доступом к серверу или базе данных технически может обойти защиту.</p>
-				</div>
-			</details>
+			<?php self::render_log_cleanup( 'forms' ); ?>
 
  			<?php if ( empty($logs) ) : ?>
  				<p>Записей пока нет.</p>

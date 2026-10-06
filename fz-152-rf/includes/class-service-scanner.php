@@ -7,8 +7,8 @@ final class ServiceScanner {
 
 	private const TRANSIENT_TTL          = 10 * MINUTE_IN_SECONDS;
 	private const RESPONSE_LIMIT         = 5 * MB_IN_BYTES;
-	private const TRANSIENT_KEY          = 'f152_service_scan_site_v27';
-	private const BROWSER_TRANSIENT_KEY  = 'f152_service_scan_browser_site_v5';
+	private const TRANSIENT_KEY          = 'f152_service_scan_site_v28';
+	private const BROWSER_TRANSIENT_KEY  = 'f152_service_scan_browser_site_v6';
 	private const BROWSER_WORK_KEY       = 'f152_service_scan_browser_work_v1';
 	private const BROWSER_LOCK_KEY       = 'f152_service_scan_browser_lock_v1';
 	private const BROWSER_LOCK_TTL       = 90;
@@ -304,6 +304,25 @@ final class ServiceScanner {
 		] );
 		$page_ids = is_array( $page_ids ) ? $page_ids : [];
 
+		 
+		 
+		$comment_ids = get_posts( [
+			'post_type' => 'post',
+			'post_status' => 'publish',
+			'comment_status' => 'open',
+			'posts_per_page' => 11,
+			'fields' => 'ids',
+			'orderby' => 'ID',
+			'order' => 'DESC',
+			'no_found_rows' => true,
+			'update_post_meta_cache' => false,
+			'update_post_term_cache' => false,
+		] );
+		$comment_ids = is_array( $comment_ids ) ? array_map( 'intval', $comment_ids ) : [];
+		$comments_truncated = count( $comment_ids ) > 10;
+		$comment_ids = array_slice( $comment_ids, 0, 10 );
+		$page_ids = array_values( array_unique( array_merge( $comment_ids, $page_ids ) ) );
+
 		$priority_ids = [];
 		if ( function_exists( 'wc_get_page_id' ) ) {
 			foreach ( [ 'checkout', 'myaccount' ] as $wc_page ) {
@@ -335,6 +354,10 @@ final class ServiceScanner {
 				$priority[] = $item;
 				continue;
 			}
+			if ( in_array( $page_id, $comment_ids, true ) ) {
+				$candidates[] = $item;
+				continue;
+			}
 			$source = self::get_page_source( $page_id );
 			if ( '' !== $source && ( ! empty( self::get_detected_definitions( $source, $definitions ) ) || preg_match( '/<form\\b|contact-form-7|wpforms|forminator|fluentform|ninja_form|gravityform|sureforms|formidable|formlayer|srfm|metform|elementor.*form|woocommerce|my[_ -]?account/i', $source ) ) ) {
 				$candidates[] = $item;
@@ -351,7 +374,7 @@ final class ServiceScanner {
 		return [
 			'targets' => $targets,
 			'total_pages' => $total,
-			'truncated' => count( $targets ) < $total,
+			'truncated' => $comments_truncated || count( $targets ) < $total,
 		];
 	}
 

@@ -71,9 +71,153 @@
 				initPreview();
                 initServiceCategoryTabs();
                 initSurvey();
+                initFeatureRequest();
                 initBrowserScanner();
         }
 
+
+        function initFeatureRequest() {
+                var modal = document.querySelector('[data-f152-feature-modal]');
+                var openButtons = document.querySelectorAll('[data-f152-feature-open]');
+                if (!modal || !openButtons.length) {
+                        return;
+                }
+
+                var cfg = (typeof window.F152FeatureRequest === 'object' && window.F152FeatureRequest) ? window.F152FeatureRequest : null;
+                var textarea = modal.querySelector('[data-f152-feature-message]');
+                var submit = modal.querySelector('[data-f152-feature-submit]');
+                var status = modal.querySelector('[data-f152-feature-status]');
+                var counter = modal.querySelector('[data-f152-feature-counter]');
+                var closeButtons = modal.querySelectorAll('[data-f152-feature-close]');
+                var maxLength = cfg && parseInt(cfg.maxLength, 10) > 0 ? parseInt(cfg.maxLength, 10) : 4000;
+                var lastFocused = null;
+                var sending = false;
+
+                function updateCounter() {
+                        if (!counter || !textarea) {
+                                return;
+                        }
+                        counter.textContent = textarea.value.length + ' / ' + maxLength;
+                }
+
+                function setFeatureStatus(message, type) {
+                        if (!status) {
+                                return;
+                        }
+                        status.textContent = message || '';
+                        status.classList.remove('is-error', 'is-success');
+                        if (type) {
+                                status.classList.add('is-' + type);
+                        }
+                }
+
+                function openModal(event) {
+                        if (event) {
+                                event.preventDefault();
+                                lastFocused = event.currentTarget || null;
+                        }
+                        modal.hidden = false;
+                        document.body.classList.add('f152-modal-open');
+                        setFeatureStatus('', '');
+                        updateCounter();
+                        window.setTimeout(function(){
+                                if (textarea) {
+                                        textarea.focus();
+                                }
+                        }, 0);
+                }
+
+                function closeModal() {
+                        if (sending) {
+                                return;
+                        }
+                        modal.hidden = true;
+                        document.body.classList.remove('f152-modal-open');
+                        setFeatureStatus('', '');
+                        if (lastFocused && typeof lastFocused.focus === 'function') {
+                                lastFocused.focus();
+                        }
+                }
+
+                openButtons.forEach(function(button){
+                        button.addEventListener('click', openModal);
+                });
+                closeButtons.forEach(function(button){
+                        button.addEventListener('click', closeModal);
+                });
+
+                if (textarea) {
+                        textarea.maxLength = maxLength;
+                        textarea.addEventListener('input', updateCounter);
+                        updateCounter();
+                }
+
+                document.addEventListener('keydown', function(event){
+                        if (event.key === 'Escape' && !modal.hidden) {
+                                closeModal();
+                        }
+                });
+
+                if (!submit || !textarea) {
+                        return;
+                }
+
+                submit.addEventListener('click', function(){
+                        var message = textarea.value.trim();
+                        if (!message) {
+                                setFeatureStatus('Напишите предложение перед отправкой.', 'error');
+                                textarea.focus();
+                                return;
+                        }
+                        if (!cfg || !cfg.ajaxUrl || !cfg.action || !cfg.nonce || typeof window.fetch !== 'function') {
+                                setFeatureStatus('Отправка сейчас недоступна. Попробуйте позже.', 'error');
+                                return;
+                        }
+
+                        sending = true;
+                        submit.disabled = true;
+                        textarea.disabled = true;
+                        setFeatureStatus('Отправляем…', '');
+
+                        var body = new FormData();
+                        body.append('action', cfg.action);
+                        body.append('nonce', cfg.nonce);
+                        body.append('message', message);
+
+                        window.fetch(cfg.ajaxUrl, {
+                                method: 'POST',
+                                credentials: 'same-origin',
+                                body: body
+                        }).then(function(response){
+                                return response.json().catch(function(){ return null; }).then(function(data){
+                                        return { ok: response.ok, data: data };
+                                });
+                        }).then(function(result){
+                                var data = result.data || {};
+                                if (!result.ok || !data.success) {
+                                        var errorMessage = data && data.data && data.data.message ? data.data.message : 'Не удалось отправить предложение. Попробуйте позже.';
+                                        throw new Error(errorMessage);
+                                }
+
+                                var successMessage = data && data.data && data.data.message ? data.data.message : 'Спасибо! Предложение отправлено.';
+                                setFeatureStatus(successMessage, 'success');
+                                textarea.value = '';
+                                updateCounter();
+                                window.setTimeout(function(){
+                                        sending = false;
+                                        submit.disabled = false;
+                                        textarea.disabled = false;
+                                        closeModal();
+                                }, 1200);
+                        }).catch(function(error){
+                                sending = false;
+                                submit.disabled = false;
+                                textarea.disabled = false;
+                                setFeatureStatus(error && error.message ? error.message : 'Не удалось отправить предложение. Попробуйте позже.', 'error');
+                                textarea.focus();
+                        });
+                });
+        }
 
         function initBrowserScanner() {
                 var root = document.querySelector('[data-f152-browser-scan]');
@@ -540,7 +684,7 @@
                         var output = control.querySelector('.f152-opacity__value');
                         var fallback = control.getAttribute('data-f152-color-default') || (textInput ? textInput.getAttribute('placeholder') : '') || '#000000';
 
-                        if (!textInput || !button || !picker || !range || !output) {
+                        if (!textInput || !picker || !range || !output) {
                                 return;
                         }
 
@@ -563,17 +707,18 @@
                                 textInput.value = formatted;
                         }
 
-                        button.addEventListener('click', function(){
-                                if (typeof picker.showPicker === 'function') {
-                                        try {
-                                                picker.showPicker();
-                                                return;
-                                        } catch (e) {
+                        if (button) {
+                                button.addEventListener('click', function(){
+                                        if (typeof picker.showPicker === 'function') {
+                                                try {
+                                                        picker.showPicker();
+                                                        return;
+                                                } catch (e) {
+                                                }
                                         }
-                                }
-								
-                                picker.click();
-                        });
+                                        picker.click();
+                                });
+                        }
 
                         picker.addEventListener('input', function(){
                                 var chosen = picker.value || fallback;
@@ -611,14 +756,8 @@
                 return value === 'dark' ? 'dark' : (defaultTheme === 'dark' ? 'dark' : 'light');
         }
 
-        function applyMacros(text, data) {
+        function applyCommonMacros(text, data) {
                 var source = (text || '').replace(/\r?\n/g, '<br>');
-                var buttons = {
-                        '[f152_btn_accept]': '<button type="button" class="f152-btn f152-btn--accept">' + data.labels.accept + '</button>',
-                        '[f152_btn_settings]': '<button type="button" class="f152-btn f152-btn--settings">' + data.labels.settings + '</button>',
-                        '[f152_btn_reject]': '<button type="button" class="f152-btn f152-btn--reject">' + data.labels.reject + '</button>'
-                };
-
                 var macros = {
                         '[f152_site_url]': data.macros.siteUrl,
                         '[f152_company_name]': data.macros.company,
@@ -630,12 +769,51 @@
                         '[f152_link_consent_marketing]': data.macros.consentMarketing
                 };
 
-                Object.keys(buttons).forEach(function(key){
-                        source = source.split(key).join(buttons[key]);
-                });
-
                 Object.keys(macros).forEach(function(key){
                         source = source.split(key).join(macros[key] || '');
+                });
+
+                return source;
+        }
+
+        function previewButtonHtml(type, data) {
+                if (type === 'accept') {
+                        return '<button type="button" class="f152-btn f152-btn--accept">' + data.labels.accept + '</button>';
+                }
+                if (type === 'settings') {
+                        return '<button type="button" class="f152-btn f152-btn--settings">' + data.labels.settings + '</button>';
+                }
+                return '<button type="button" class="f152-btn f152-btn--reject">' + data.labels.reject + '</button>';
+        }
+
+        function splitBannerPreview(text, data) {
+                var actions = [];
+                var message = (text || '').replace(/\[f152_btn_(accept|settings|reject)\]/g, function(match, type){
+                        actions.push(previewButtonHtml(type, data));
+                        return '';
+                });
+
+                message = applyCommonMacros(message, data)
+                        .replace(/(?:\s|&nbsp;)+(?=<br>)/g, '')
+                        .replace(/(?:<br>\s*){2,}/g, '<br>')
+                        .trim();
+
+                return {
+                        message: message,
+                        actions: actions.join('')
+                };
+        }
+
+        function applyMacros(text, data) {
+                var source = applyCommonMacros(text, data);
+                var buttons = {
+                        '[f152_btn_accept]': previewButtonHtml('accept', data),
+                        '[f152_btn_settings]': previewButtonHtml('settings', data),
+                        '[f152_btn_reject]': previewButtonHtml('reject', data)
+                };
+
+                Object.keys(buttons).forEach(function(key){
+                        source = source.split(key).join(buttons[key]);
                 });
 
                 return source;
@@ -813,8 +991,19 @@
                         };
 
                         var bannerText = getFieldValue('f152_banner_text', defaults.banner);
-
-                        var bannerHtml = '<div class="f152-banner" role="dialog"><div class="f152-banner__inner"><div class="f152-banner__text">' + applyMacros(bannerText, data) + '</div></div></div>';
+                        var bannerParts = splitBannerPreview(bannerText, data);
+                        var bannerActions = bannerParts.actions !== ''
+                                ? '<div class="f152-banner__actions">' + bannerParts.actions + '</div>'
+                                : '';
+                        var bannerHtml = '' +
+                                '<div class="f152-banner" role="dialog">' +
+                                '  <div class="f152-banner__inner">' +
+                                '    <div class="f152-banner__layout">' +
+                                '      <div class="f152-banner__message">' + bannerParts.message + '</div>' +
+                                       bannerActions +
+                                '    </div>' +
+                                '  </div>' +
+                                '</div>';
 
                         var frames = preview.querySelectorAll('[data-f152-preview-frame]');
                         frames.forEach(function(frame){

@@ -15,14 +15,6 @@ final class BannerStats {
 
 	private const ALLOWED_ACTIONS = [ 'show', 'accept', 'reject', 'custom' ];
 
-	private const BOT_SIGNATURES = [
-		'bot', 'crawl', 'crawler', 'spider', 'slurp', 'googlebot', 'bingbot',
-		'bingpreview', 'yandex', 'baidu', 'duckduckbot', 'ahrefs', 'semrush',
-		'dotbot', 'petalbot', 'mj12', 'facebookexternalhit', 'twitterbot',
-		'linkedinbot', 'telegrambot', 'whatsapp', 'headless', 'phantom',
-		'selenium', 'puppeteer', 'playwright', 'wget', 'curl', 'python-requests',
-	];
-
 	private const CLEANUP_HOOK    = 'f152_banner_stats_cleanup';
 	private const CLEANUP_BATCH   = 500;
 
@@ -43,7 +35,8 @@ final class BannerStats {
 	public static function table_exists() : bool {
 		global $wpdb;
 		$table_name = self::get_table_name();
-		return $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table_name ) ) === $table_name;
+		$table_like = $wpdb->esc_like( $table_name );
+		return $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table_like ) ) === $table_name;
 	}
 
 	public static function get_db_version() : string {
@@ -142,63 +135,60 @@ final class BannerStats {
 	}
 
 	public static function handle_request( \WP_REST_Request $request ) {
-		static $processed = false;
-		if ( $processed ) {
-			return rest_ensure_response( [ 'success' => true ] );
-		}
-
 		$content_length = (int) $request->get_header( 'content_length' );
-		if ( $content_length > 0 && $content_length > 8192 ) {
-			return rest_ensure_response( [ 'success' => true ] );
+		if ( $content_length > 8192 ) {
+			return new \WP_Error(
+				'f152_banner_stats_payload_too_large',
+				__( 'Некорректный запрос статистики cookie-баннера.', 'fz-152-rf' ),
+				[ 'status' => 413 ]
+			);
 		}
 
 		$action = is_string( $request->get_param( 'action' ) ) ? $request->get_param( 'action' ) : '';
 		if ( ! in_array( $action, self::ALLOWED_ACTIONS, true ) ) {
-			return rest_ensure_response( [ 'success' => true ] );
+			return new \WP_Error(
+				'f152_banner_stats_invalid_action',
+				__( 'Некорректное действие статистики cookie-баннера.', 'fz-152-rf' ),
+				[ 'status' => 400 ]
+			);
 		}
 
 		$session_token = is_string( $request->get_param( 'session_token' ) ) ? $request->get_param( 'session_token' ) : '';
 		if ( ! self::is_valid_session_token( $session_token ) ) {
-			return rest_ensure_response( [ 'success' => true ] );
-		}
-
-		if ( ! self::is_same_origin() ) {
-			return rest_ensure_response( [ 'success' => true ] );
-		}
-
-		$ua = self::get_user_agent();
-		if ( self::is_bot( $ua ) ) {
-			return rest_ensure_response( [ 'success' => true ] );
+			return new \WP_Error(
+				'f152_banner_stats_invalid_token',
+				__( 'Некорректный идентификатор сеанса cookie-баннера.', 'fz-152-rf' ),
+				[ 'status' => 400 ]
+			);
 		}
 
 		$stats_salt = self::get_salt();
 		if ( $stats_salt === '' ) {
-			return rest_ensure_response( [ 'success' => true ] );
+			return new \WP_Error(
+				'f152_banner_stats_unavailable',
+				__( 'Статистика cookie-баннера временно недоступна.', 'fz-152-rf' ),
+				[ 'status' => 503 ]
+			);
 		}
-
-		$fingerprint = self::build_fingerprint( $stats_salt );
-
-		if ( ! self::rate_limit_allowed( $fingerprint ) ) {
-			return rest_ensure_response( [ 'success' => true ] );
-		}
-
-		if ( ! self::table_exists() ) {
-			return rest_ensure_response( [ 'success' => true ] );
-		}
-
-		$processed = true;
 
 		$session_hash = hash_hmac( 'sha256', $session_token, $stats_salt );
-
 		$previous_show_errors = self::suppress_db_errors();
 
 		if ( $action === 'show' ) {
-			self::record_show( $session_hash );
+			$saved = self::record_show( $session_hash );
 		} else {
-			self::record_decision( $session_hash, $action );
+			$saved = self::record_decision( $session_hash, $action );
 		}
 
 		self::restore_db_errors( $previous_show_errors );
+
+		if ( ! $saved ) {
+			return new \WP_Error(
+				'f152_banner_stats_db_error',
+				__( 'Не удалось сохранить статистику cookie-баннера.', 'fz-152-rf' ),
+				[ 'status' => 500 ]
+			);
+		}
 
 		return rest_ensure_response( [ 'success' => true ] );
 	}
@@ -227,38 +217,40 @@ final class BannerStats {
 		}
 	}
 
-	private static function record_show( string $session_hash ) : void {
+	private static function record_show( string $session_hash ) : bool {
 		global $wpdb;
 
 		$table_name = esc_sql( self::get_table_name() );
 		$now_utc    = current_time( 'mysql', true );
 
-		$wpdb->query(
+		$result = $wpdb->query(
 			$wpdb->prepare(
-				// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is generated internally and escaped with esc_sql(); INSERT IGNORE is atomic.
+				// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is generated internally and escaped with esc_sql(); INSERT IGNORE makes repeated SHOW idempotent.
 				"INSERT IGNORE INTO `{$table_name}` (session_hash, status, shown_at_utc, updated_at_utc) VALUES (%s, 'pending', %s, %s)",
 				$session_hash,
 				$now_utc,
 				$now_utc
 			)
 		);
+
+		 
+		return $result !== false;
 	}
 
-	private static function record_decision( string $session_hash, string $action ) : void {
+	private static function record_decision( string $session_hash, string $action ) : bool {
 		global $wpdb;
 
 		$table_name = esc_sql( self::get_table_name() );
 		$now_utc    = current_time( 'mysql', true );
 
-		$wpdb->query(
+		$result = $wpdb->query(
 			$wpdb->prepare(
-				// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is generated internally and escaped with esc_sql(); ON DUPLICATE KEY UPDATE is atomic.
+				// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is generated internally and escaped with esc_sql(); ON DUPLICATE KEY UPDATE is atomic and idempotent.
 				"INSERT INTO `{$table_name}` (session_hash, status, shown_at_utc, decided_at_utc, updated_at_utc)
 				VALUES (%s, %s, %s, %s, %s)
 				ON DUPLICATE KEY UPDATE
-					status = IF(status = 'pending', VALUES(status), status),
 					decided_at_utc = IF(status = 'pending', VALUES(decided_at_utc), decided_at_utc),
-					shown_at_utc = shown_at_utc,
+					status = IF(status = 'pending', VALUES(status), status),
 					updated_at_utc = VALUES(updated_at_utc)",
 				$session_hash,
 				$action,
@@ -267,126 +259,8 @@ final class BannerStats {
 				$now_utc
 			)
 		);
-	}
 
-	private static function get_user_agent() : string {
-		if ( ! isset( $_SERVER['HTTP_USER_AGENT'] ) ) {
-			return '';
-		}
-		return sanitize_text_field( wp_unslash( $_SERVER['HTTP_USER_AGENT'] ) );
-	}
-
-	public static function is_bot( string $ua ) : bool {
-		if ( $ua === '' ) {
-			return true;
-		}
-		$ua_lower = strtolower( $ua );
-		foreach ( self::BOT_SIGNATURES as $signature ) {
-			if ( strpos( $ua_lower, $signature ) !== false ) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	private static function is_same_origin() : bool {
-		$home_host = (string) wp_parse_url( home_url(), PHP_URL_HOST );
-
-		$origin = '';
-		if ( isset( $_SERVER['HTTP_ORIGIN'] ) ) {
-			$origin = sanitize_text_field( wp_unslash( $_SERVER['HTTP_ORIGIN'] ) );
-		}
-
-		if ( $origin !== '' ) {
-			$origin_host = (string) wp_parse_url( $origin, PHP_URL_HOST );
-			if ( $origin_host !== '' && strtolower( $origin_host ) !== strtolower( $home_host ) ) {
-				return false;
-			}
-		}
-
-		$referer = '';
-		if ( isset( $_SERVER['HTTP_REFERER'] ) ) {
-			$referer = sanitize_text_field( wp_unslash( $_SERVER['HTTP_REFERER'] ) );
-		}
-
-		if ( $referer !== '' ) {
-			$referer_host = (string) wp_parse_url( $referer, PHP_URL_HOST );
-			if ( $referer_host !== '' && strtolower( $referer_host ) !== strtolower( $home_host ) ) {
-				return false;
-			}
-		}
-
-		return true;
-	}
-
-	private static function build_fingerprint( string $stats_salt ) : string {
-		$ip = self::get_remote_ip();
-		$ua = self::get_user_agent();
-
-		return hash_hmac( 'sha256', $ip . '|' . $ua, $stats_salt );
-	}
-
-	private static function get_remote_ip() : string {
-		if ( isset( $_SERVER['REMOTE_ADDR'] ) ) {
-			return sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) );
-		}
-		return '';
-	}
-
-	private static function rate_limit_allowed( string $fingerprint ) : bool {
-		$window      = 5 * MINUTE_IN_SECONDS;
-		$max_per_ip  = 30;
-
-		if ( function_exists( 'wp_using_ext_object_cache' ) && wp_using_ext_object_cache() ) {
-			$cache_key = 'f152_bs_rl:' . substr( $fingerprint, 0, 32 );
-			$count     = (int) wp_cache_get( $cache_key, 'f152_banner_stats' );
-			if ( $count >= $max_per_ip ) {
-				return false;
-			}
-			wp_cache_incr( $cache_key, 1, 'f152_banner_stats', 1 );
-			if ( $count === 0 ) {
-				wp_cache_set( $cache_key, 1, 'f152_banner_stats', $window );
-			}
-			return true;
-		}
-
-		$bucket_key = 'f152_bs_rl_bucket';
-		$bucket     = get_transient( $bucket_key );
-		if ( ! is_array( $bucket ) ) {
-			$bucket = [];
-		}
-
-		$now      = time();
-		$max_keys = 2000;
-
-		foreach ( $bucket as $fp => $data ) {
-			if ( ! is_array( $data ) || ! isset( $data['exp'] ) || $data['exp'] < $now ) {
-				unset( $bucket[ $fp ] );
-			}
-		}
-
-		if ( isset( $bucket[ $fingerprint ] ) ) {
-			$bucket[ $fingerprint ]['count']++;
-			if ( $bucket[ $fingerprint ]['count'] > $max_per_ip ) {
-				set_transient( $bucket_key, $bucket, $window );
-				return false;
-			}
-			$bucket[ $fingerprint ]['exp'] = $now + $window;
-		} else {
-			if ( count( $bucket ) >= $max_keys ) {
-				uasort( $bucket, function ( $a, $b ) {
-					return ( $a['exp'] ?? 0 ) <=> ( $b['exp'] ?? 0 );
-				} );
-				$bucket = array_slice( $bucket, -1 * (int) floor( $max_keys * 0.75 ), null, true );
-			}
-			$bucket[ $fingerprint ] = [
-				'count' => 1,
-				'exp'   => $now + $window,
-			];
-		}
-
-		set_transient( $bucket_key, $bucket, $window );
-		return true;
+		return $result !== false;
 	}
 
 	public static function get_ignore_after_seconds() : int {

@@ -12,57 +12,57 @@ final class PluginDetector {
 			[
 				'id'    => 'contact-form-7',
 				'name'  => 'Contact Form 7',
-				'check' => static fn() => defined( 'WPCF7_VERSION' ) || class_exists( 'WPCF7_ContactForm' ),
+				'check' => static function () { return defined( 'WPCF7_VERSION' ) || class_exists( 'WPCF7_ContactForm' ); },
 			],
 			[
 				'id'    => 'wpforms',
 				'name'  => 'WPForms',
-				'check' => static fn() => function_exists( 'wpforms' ) || defined( 'WPFORMS_VERSION' ),
+				'check' => static function () { return function_exists( 'wpforms' ) || defined( 'WPFORMS_VERSION' ); },
 			],
 			[
 				'id'    => 'wpdiscuz',
 				'name'  => 'wpDiscuz',
-				'check' => static fn() => class_exists( 'WpdiscuzCore' ) || defined( 'WPDISCUZ_VERSION' ),
+				'check' => static function () { return class_exists( 'WpdiscuzCore' ) || defined( 'WPDISCUZ_VERSION' ); },
 			],
 			[
 				'id'    => 'ninja-forms',
 				'name'  => 'Ninja Forms',
-				'check' => static fn() => class_exists( 'Ninja_Forms' ) || defined( 'NF_PLUGIN_URL' ),
+				'check' => static function () { return class_exists( 'Ninja_Forms' ) || defined( 'NF_PLUGIN_URL' ); },
 			],
 			[
 				'id'    => 'fluent-forms',
 				'name'  => 'Fluent Forms',
-				'check' => static fn() => defined( 'FLUENTFORM' ) || defined( 'FLUENTFORM_VERSION' ),
+				'check' => static function () { return defined( 'FLUENTFORM' ) || defined( 'FLUENTFORM_VERSION' ); },
 			],
 			[
 				'id'    => 'forminator',
 				'name'  => 'Forminator',
-				'check' => static fn() => defined( 'FORMINATOR_VERSION' ) || class_exists( 'Forminator' ),
+				'check' => static function () { return defined( 'FORMINATOR_VERSION' ) || class_exists( 'Forminator' ); },
 			],
 			[
 				'id'    => 'metform',
 				'name'  => 'MetForm',
-				'check' => static fn() => defined( 'METFORM_VERSION' ) || class_exists( '\MetForm\Plugin' ) || did_action( 'metform/after_load' ),
+				'check' => static function () { return defined( 'METFORM_VERSION' ) || class_exists( '\MetForm\Plugin' ) || did_action( 'metform/after_load' ); },
 			],
 			[
 				'id'    => 'formlayer',
 				'name'  => 'FormLayer',
-				'check' => static fn() => defined( 'FORMLAYER_VERSION' ) || class_exists( '\FormLayer\Frontend' ),
+				'check' => static function () { return defined( 'FORMLAYER_VERSION' ) || class_exists( '\FormLayer\Frontend' ); },
 			],
 			[
 				'id'    => 'formidable',
 				'name'  => 'Formidable Forms',
-				'check' => static fn() => class_exists( 'FrmForm' ),
+				'check' => static function () { return class_exists( 'FrmForm' ); },
 			],
 			[
 				'id'    => 'sureforms',
 				'name'  => 'SureForms',
-				'check' => static fn() => defined( 'SRFM_VER' ) || class_exists( '\SRFM\Inc\Form_Submit' ),
+				'check' => static function () { return defined( 'SRFM_VER' ) || class_exists( '\SRFM\Inc\Form_Submit' ); },
 			],
 			[
 				'id'    => 'gravity-forms',
 				'name'  => 'Gravity Forms',
-				'check' => static fn() => defined( 'GF_VERSION' ) || class_exists( 'GFForms' ) || class_exists( 'GFAPI' ),
+				'check' => static function () { return defined( 'GF_VERSION' ) || class_exists( 'GFForms' ) || class_exists( 'GFAPI' ); },
 			],
 			[
 				'id'    => 'elementor-pro',

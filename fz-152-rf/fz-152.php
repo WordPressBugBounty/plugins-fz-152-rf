@@ -2,7 +2,8 @@
 /**
  * Plugin Name: FZ-152 RF
  * Description: Банер куки внизу сайта с кнопками принять/отклонить/настройки, не активные чекбоксы у отзывов, комментов и странице заказа WooCommerce, согласно ФЗ 152. Шаблоны с текстом страниц политик и соглашений.
- * Version: 0.2.7
+ * Version: 0.2.8
+ * Requires PHP: 7.1
  * Author: Котик
  * License: GPLv2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -12,7 +13,7 @@
 
 if ( ! defined('ABSPATH') ) exit;
 
-define('F152_VERSION', '0.2.7');
+define('F152_VERSION', '0.2.8');
 define('F152_FILE', __FILE__);
 define('F152_DIR', plugin_dir_path(__FILE__));
 define('F152_URL', plugin_dir_url(__FILE__));
@@ -21,6 +22,7 @@ define('F152_SLUG', 'fz-152-rf');
 if ( ! defined( 'F152_PRODUCT_SITE_URL' ) ) define( 'F152_PRODUCT_SITE_URL', 'https://fz152rf.ru/' );
 if ( ! defined( 'F152_PURCHASE_URL' ) ) define( 'F152_PURCHASE_URL', 'https://fz152rf.ru/' );
 if ( ! defined( 'F152_SURVEY_ENDPOINT' ) ) define( 'F152_SURVEY_ENDPOINT', 'https://fz152rf.ru/wp-json/ls/v1/f152-survey' );
+if ( ! defined( 'F152_FEATURE_REQUEST_ENDPOINT' ) ) define( 'F152_FEATURE_REQUEST_ENDPOINT', 'https://fz152rf.ru/wp-json/ls/v1/f152-feature-request' );
 if ( ! defined( 'F152_SUPPORT_URL' ) ) define( 'F152_SUPPORT_URL', 'https://fz152rf.ru/' );
 if ( ! defined( 'F152_PARTNER_URL' ) ) define( 'F152_PARTNER_URL', 'https://fz152rf.ru/fz152-partner/' );
 
@@ -32,6 +34,7 @@ require_once F152_DIR . 'includes/helpers.php';
 require_once F152_DIR . 'includes/class-assets.php';
 require_once F152_DIR . 'includes/class-consent.php';
 require_once F152_DIR . 'includes/class-consent-log.php';
+require_once F152_DIR . 'includes/class-cookie-consent-log.php';
 require_once F152_DIR . 'includes/class-banner-stats.php';
 require_once F152_DIR . 'includes/class-banner.php';
 require_once F152_DIR . 'includes/class-metrika.php';
@@ -45,6 +48,7 @@ require_once F152_DIR . 'includes/class-form-signals.php';
 require_once F152_DIR . 'includes/class-service-scanner.php';
 require_once F152_DIR . 'includes/class-service-inventory.php';
 require_once F152_DIR . 'includes/class-survey.php';
+require_once F152_DIR . 'includes/class-feature-request.php';
 require_once F152_DIR . 'includes/class-settings.php';
 require_once F152_DIR . 'includes/class-templates.php';
 
@@ -275,6 +279,9 @@ register_activation_hook(__FILE__, function () {
 	if ( class_exists('\\F152\\ConsentLog') ) {
 		\F152\ConsentLog::create_table();
 	}
+	\F152\CookieConsentLog::ensure_defaults();
+	\F152\CookieConsentLog::create_table();
+	\F152\CookieConsentLog::ensure_cron();
 
 	if ( class_exists('\\F152\\BannerStats') ) {
 		\F152\BannerStats::create_table();
@@ -326,6 +333,8 @@ add_action( 'plugins_loaded', function () {
 }, 7 );
 
 add_action('plugins_loaded', function () {
+	\F152\CookieConsentLog::init();
+	\F152\CookieConsentLog::maybe_upgrade();
 	if ( class_exists('\\F152\\BannerStats') ) {
 		\F152\BannerStats::maybe_upgrade();
 		\F152\BannerStats::init();
@@ -333,6 +342,7 @@ add_action('plugins_loaded', function () {
 });
 
 register_deactivation_hook(__FILE__, function () {
+	\F152\CookieConsentLog::clear_cron();
 	if ( class_exists('\\F152\\BannerStats') ) {
 		\F152\BannerStats::clear_cron();
 	}
@@ -408,6 +418,9 @@ add_action('admin_enqueue_scripts', function($hook){
 });
 if ( class_exists('\\F152\\Survey') ) {
 	\F152\Survey::init();
+}
+if ( class_exists('\\F152\\FeatureRequest') ) {
+	\F152\FeatureRequest::init();
 }
 add_action('admin_init', function(){
 	if ( class_exists('\\F152\\Templates') ) {

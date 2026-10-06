@@ -7,7 +7,7 @@ final class PolicyServices {
 
 	public const ZONE_VERSION = 1;
 	private const FREE_SYNC_ACTION = 'f152_sync_free_policy_services';
-	private static bool $initialized = false;
+	private static $initialized = false;
 
 	public static function init(): void {
 		if ( self::$initialized ) {
@@ -163,7 +163,7 @@ final class PolicyServices {
 			$other_chunks[] = trim( (string) $chunk );
 		}
 
-		$chunks = array_values( array_filter( array_merge( $free_chunks, $other_chunks ), static fn( $chunk ): bool => '' !== trim( (string) $chunk ) ) );
+		$chunks = array_values( array_filter( array_merge( $free_chunks, $other_chunks ), static function( $chunk ): bool { return '' !== trim( (string) $chunk ); } ) );
 		$start = sprintf( '<!-- f152-services:start:%s:v%d -->', $document, self::ZONE_VERSION );
 		$end = sprintf( '<!-- f152-services:end:%s -->', $document );
 		$zone = $start . "\n" . ( empty( $chunks ) ? '' : implode( "\n\n", $chunks ) . "\n" ) . $end;
@@ -552,7 +552,7 @@ final class PolicyServices {
 				<?php endif; ?>
 
 				<?php if ( ! $free_pending ) : ?>
-					<?php /* Only preserved Pro text needs attention; Free has nothing to rewrite. */ ?>
+					<?php   ?>
 				<?php elseif ( $page_id <= 0 ) : ?>
 					<div class="notice notice-info inline"><p><?php echo esc_html__( 'Эта страница политики не была создана FZ-152, поэтому плагин не будет менять её автоматически. Если вы ведёте политику вручную — ничего делать не нужно. Чтобы включить автообновление, создайте страницы политик через кнопку «Создать страницы» в основных настройках.', 'fz-152-rf' ); ?></p></div>
 				<?php elseif ( ! empty( $readiness['blocked'] ) || empty( $readiness['ready'] ) ) : ?>

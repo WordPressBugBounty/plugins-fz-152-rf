@@ -1,7 +1,7 @@
 <?php
-/**
- * Очистка данных при удалении плагина ФЗ-152.
- */
+ 
+
+
 
 if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 	exit;
@@ -79,6 +79,11 @@ $f152_opts = [
 	'f152_consent_log_db_version',
 	'f152_log_cleanup_password_hash',
 	'f152_api_tokens_v1',
+	'f152_cookie_consent_log_db_version',
+	'f152_cookie_log_enabled',
+	'f152_cookie_log_capture_ip',
+	'f152_cookie_log_capture_user_agent',
+	'f152_cookie_log_retention_days',
 	'f152_policy_snapshots_db_version',
 	'f152_policy_snapshots_seeded_v1',
 
@@ -97,8 +102,11 @@ delete_transient( 'f152_service_scan_home_v2' );
 delete_transient( 'f152_service_scan_home_v3' );
 delete_transient( 'f152_service_scan_browser_home_v2' );
 delete_transient( 'f152_service_scan_browser_site_v3' );
+delete_transient( 'f152_service_scan_browser_site_v4' );
+delete_transient( 'f152_service_scan_browser_site_v5' );
+delete_transient( 'f152_service_scan_browser_site_v6' );
 delete_transient( 'f152_service_scan_browser_work_v1' );
-for ( $f152_scan_version = 4; $f152_scan_version <= 27; $f152_scan_version++ ) {
+for ( $f152_scan_version = 4; $f152_scan_version <= 28; $f152_scan_version++ ) {
 	delete_transient( 'f152_service_scan_site_v' . $f152_scan_version );
 }
 
@@ -126,6 +134,12 @@ $wpdb->query(
 // phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.SchemaChange
 
 wp_clear_scheduled_hook( 'f152_banner_stats_cleanup' );
+wp_clear_scheduled_hook( 'f152_cookie_consent_log_cleanup' );
+delete_transient( 'f152_cookie_log_rl_bucket' );
+
+$f152_cookie_table_name = esc_sql( $wpdb->prefix . 'f152_cookie_consent_log' );
+// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Internal escaped table name; matches the plugin's uninstall policy.
+$wpdb->query( "DROP TABLE IF EXISTS `{$f152_cookie_table_name}`" );
 
 delete_option( 'f152_service_scan_lock_v1' );
 delete_option( 'f152_service_scan_browser_lock_v1' );

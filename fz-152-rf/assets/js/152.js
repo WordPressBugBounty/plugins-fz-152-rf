@@ -16,7 +16,12 @@
 
   function readCookie(name) {
     var m = document.cookie.match(new RegExp("(?:^|; )" + name.replace(/([.$?*|{}()[\]\\/+^])/g, "\\$1") + "=([^;]*)"));
-    return m ? decodeURIComponent(m[1]) : null;
+    if (!m) return null;
+    try {
+      return decodeURIComponent(m[1]);
+    } catch (e) {
+      return null;
+    }
   }
 
   function delCookie(name, domain) {
@@ -86,7 +91,7 @@
     return state[category] === true;
   }
 
-  function allowCategory(category) {
+  function allowCategory(category, source) {
     if (category !== 'analytics' && category !== 'marketing') return false;
 
     var state = getConsentState();
@@ -96,14 +101,23 @@
     };
     groups[category] = true;
 
-    saveConsent(groups);
+    var changed = !state.current || state[category] !== true;
+    if (changed) {
+      try {
+        var bannerForGrant = getBanner();
+        if (bannerForGrant && !bannerForGrant.hidden && BannerStats && typeof BannerStats.send === 'function') {
+          BannerStats.send('custom');
+        }
+      } catch (e) {}
+    }
+    saveConsent(groups, changed ? { action: 'grant_category', source: source || 'api' } : null);
     return true;
   }
 
   window.F152Consent = {
     getState: getConsentState,
     isAllowed: isCategoryAllowed,
-    allowCategory: allowCategory,
+    allowCategory: function(category) { return allowCategory(category, 'api'); },
     hasCurrentConsent: function() { return getConsentState().current; },
     getVersion: function() { return COOKIE_VER; },
     openSettings: function() {
@@ -131,7 +145,49 @@
     } catch (e) {}
   }
 
-  function saveConsent(groups) {
+  function cookieEventId() {
+    try {
+      if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+        return window.crypto.randomUUID();
+      }
+    } catch (e) {}
+    var bytes = new Uint8Array(16);
+    try {
+      window.crypto.getRandomValues(bytes);
+    } catch (e) {
+      for (var i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+    }
+    bytes[6] = (bytes[6] & 15) | 64;
+    bytes[8] = (bytes[8] & 63) | 128;
+    var hex = [];
+    for (var j = 0; j < bytes.length; j++) hex.push(('0' + bytes[j].toString(16)).slice(-2));
+    return hex.slice(0, 4).join('') + '-' + hex.slice(4, 6).join('') + '-' + hex.slice(6, 8).join('')
+      + '-' + hex.slice(8, 10).join('') + '-' + hex.slice(10).join('');
+  }
+
+  function sendCookieLog(payload, audit) {
+    var config = CFG.cookieLog;
+    if (!audit || !config || config.enabled !== true || !config.endpointUrl) return;
+    try {
+      if (typeof window.fetch !== 'function') return;
+      window.fetch(config.endpointUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        keepalive: true,
+        body: JSON.stringify({
+          event_id: cookieEventId(),
+          action: audit.action,
+          source: audit.source,
+          analytics: !!payload.analytics,
+          marketing: !!payload.marketing,
+          page_url: window.location.origin + window.location.pathname
+        })
+      })['catch'](function () {});
+    } catch (e) {}
+  }
+
+  function saveConsent(groups, audit) {
     var payload = {
       v: COOKIE_VER,
       ts: Math.floor(Date.now()/1000),
@@ -142,6 +198,7 @@
     dispatchConsentChanged(payload);
     hideBanner();
     closePopup();
+    sendCookieLog(payload, audit);
   }
 
   function qs(sel) { return document.querySelector(sel); }
@@ -161,7 +218,7 @@
   function getBanner() { return qs('[data-f152-banner]'); }
   function getPopup()  { return qs('[data-f152-popup]'); }
 
-  function showBanner() { show(getBanner()); }
+  function showBanner() { var banner = getBanner(); if (!banner) return false; show(banner); return true; }
   function hideBanner() { hide(getBanner()); }
   function openPopup()  { show(getPopup()); focusFirstInput(); }
   function closePopup() { hide(getPopup()); }
@@ -470,17 +527,31 @@
   }
 
   var BannerStats = (function() {
-    var cfg = (CFG.bannerStats) || null;
     var showSentOnPage = false;
+    var showRetryScheduled = false;
+    var showRetryCount = 0;
+    var memoryToken = '';
+
+    function getConfig() {
+      try {
+        if (window.F152 && window.F152.bannerStats) return window.F152.bannerStats;
+      } catch (e) {}
+      return (CFG && CFG.bannerStats) || null;
+    }
 
     function isEnabled() {
+      var cfg = getConfig();
       if (!cfg) return false;
       if (cfg.enabled === false) return false;
       if (!cfg.endpointUrl) return false;
-      try {
-        if (navigator.webdriver === true) return false;
-      } catch (e) {}
       return true;
+    }
+
+    function tokenIsValid(token) {
+      return typeof token === 'string'
+        && token.length >= 32
+        && token.length <= 128
+        && /^[0-9a-fA-F-]+$/.test(token);
     }
 
     function getStorage() {
@@ -508,49 +579,121 @@
           return hex.join('');
         }
       } catch (e) {}
-      var s = '';
+      var out = '';
       for (var k = 0; k < 32; k++) {
-        s += Math.floor(Math.random() * 16).toString(16);
+        out += Math.floor(Math.random() * 16).toString(16);
       }
-      return s;
+      return out;
+    }
+
+    function getStorageKey(cfg) {
+      var key = (cfg && cfg.sessionStorageKey) || 'f152_bs_token';
+      if (COOKIE_VER) key += ':' + COOKIE_VER;
+      return key;
     }
 
     function getToken() {
+      if (tokenIsValid(memoryToken)) return memoryToken;
+
+      var cfg = getConfig();
       var storage = getStorage();
-      if (!storage) return '';
-      var key = cfg.sessionStorageKey || 'f152_bs_token';
+      var key = getStorageKey(cfg);
       var token = '';
-      try { token = storage.getItem(key) || ''; } catch (e) {}
-      if (!token) {
-        token = uuid();
+
+      if (storage) {
+        try { token = storage.getItem(key) || ''; } catch (e) { token = ''; }
+        if (!tokenIsValid(token)) token = '';
+      }
+
+      if (!token) token = uuid();
+      if (!tokenIsValid(token)) return '';
+
+      memoryToken = token;
+
+      if (storage) {
         try { storage.setItem(key, token); } catch (e) {}
       }
+
       return token;
     }
 
-    function send(action) {
-      if (!isEnabled()) return;
-      var token = getToken();
-      if (!token) return;
-
+    function beacon(cfg, action, token) {
       try {
+        if (!navigator || typeof navigator.sendBeacon !== 'function') return false;
         var fd = new FormData();
         fd.append('action', action);
         fd.append('session_token', token);
+        return navigator.sendBeacon(cfg.endpointUrl, fd) === true;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    function post(cfg, action, token, attempt) {
+      var fd;
+      try {
+        fd = new FormData();
+        fd.append('action', action);
+        fd.append('session_token', token);
+      } catch (e) {
+        return false;
+      }
+
+      if (typeof fetch !== 'function') {
+        return beacon(cfg, action, token);
+      }
+
+      try {
         fetch(cfg.endpointUrl, {
           method: 'POST',
           body: fd,
           credentials: 'same-origin',
           keepalive: true
-        })['catch'](function () {});
-      } catch (e) {}
+        }).then(function (response) {
+          if (response && response.ok) return;
+          if (attempt < 2 && (!response || response.status >= 500 || response.status === 429)) {
+            window.setTimeout(function () { post(cfg, action, token, attempt + 1); }, attempt === 0 ? 500 : 1500);
+          }
+        })['catch'](function () {
+          if (attempt < 2) {
+            window.setTimeout(function () { post(cfg, action, token, attempt + 1); }, attempt === 0 ? 500 : 1500);
+          } else {
+            beacon(cfg, action, token);
+          }
+        });
+        return true;
+      } catch (e) {
+        return beacon(cfg, action, token);
+      }
+    }
+
+    function send(action) {
+      if (!isEnabled()) return false;
+      var cfg = getConfig();
+      var token = getToken();
+      if (!cfg || !token) return false;
+      return post(cfg, action, token, 0);
     }
 
     function maybeSendShow() {
-      if (!isEnabled()) return;
       if (showSentOnPage) return;
-      showSentOnPage = true;
-      send('show');
+      var banner = getBanner();
+      if (!banner || banner.hidden) return;
+      var consent = parseConsent();
+      if (consent && isConsentCurrent(consent)) return;
+      if (send('show')) {
+        showSentOnPage = true;
+        return;
+      }
+
+      if (!showRetryScheduled && showRetryCount < 4) {
+        showRetryScheduled = true;
+        showRetryCount++;
+        window.setTimeout(function () {
+          showRetryScheduled = false;
+          if (!showSentOnPage) maybeSendShow();
+        }, 500);
+      }
     }
 
     return {
@@ -577,9 +720,7 @@
       e.preventDefault();
       var embedButton = t.closest('[data-f152-embed-allow]');
       var embedCategory = embedButton.getAttribute('data-f152-embed-allow') || 'analytics';
-      var bannerForEmbed = getBanner();
-      if (bannerForEmbed && !bannerForEmbed.hidden) BannerStats.send('custom');
-      allowCategory(embedCategory);
+      allowCategory(embedCategory, 'embed');
       return;
     }
 
@@ -599,14 +740,18 @@
     if (t && t.closest('[data-f152-accept]')) {
       e.preventDefault();
       BannerStats.send('accept');
-      saveConsent({ analytics:true, marketing:true });
+      saveConsent({ analytics:true, marketing:true }, {
+        action: 'accept_all', source: t.closest('[data-f152-popup]') ? 'preferences' : 'banner'
+      });
       return;
     }
 
     if (t && t.closest('[data-f152-reject]')) {
       e.preventDefault();
       BannerStats.send('reject');
-      saveConsent({ analytics:false, marketing:false });
+      saveConsent({ analytics:false, marketing:false }, {
+        action: 'reject_optional', source: t.closest('[data-f152-popup]') ? 'preferences' : 'banner'
+      });
       return;
     }
 
@@ -614,7 +759,7 @@
       e.preventDefault();
       var groups = readGroupsFromPopup();
       BannerStats.send('custom');
-      saveConsent(groups);
+      saveConsent(groups, { action: 'save_preferences', source: 'preferences' });
       return;
     }
   }
@@ -634,8 +779,7 @@
 
     var consent = parseConsent();
     if (!consent || !isConsentCurrent(consent)) {
-      showBanner();
-      BannerStats.maybeSendShow();
+      if (showBanner()) BannerStats.maybeSendShow();
     } else {
       hideBanner();
     }

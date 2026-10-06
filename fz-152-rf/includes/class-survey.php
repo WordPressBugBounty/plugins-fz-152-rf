@@ -208,7 +208,7 @@ final class Survey {
 				],
 				'body'        => wp_json_encode( $payload ),
 				'data_format' => 'body',
-			],
+			]
 		);
 
 		if ( is_wp_error( $response ) ) {
