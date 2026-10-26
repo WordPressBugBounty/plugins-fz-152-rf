@@ -181,7 +181,10 @@
           source: audit.source,
           analytics: !!payload.analytics,
           marketing: !!payload.marketing,
-          page_url: window.location.origin + window.location.pathname
+          page_url: window.location.origin + window.location.pathname,
+          language: (config.languageContext || {}).language || '',
+          policy_url: (config.languageContext || {}).policyUrl || '',
+          lang_sig: (config.languageContext || {}).signature || ''
         })
       })['catch'](function () {});
     } catch (e) {}
@@ -265,6 +268,37 @@
     return node ? String(node.getAttribute('data-f152-embed-token') || '') : '';
   }
 
+   
+   
+  function localizeEmbedPlaceholder(node, placeholder) {
+    if (!node || !placeholder) return;
+    var type = node.getAttribute('data-f152-embed-type') || 'content';
+    var group = (type === 'map' || type === 'reviews' || type === 'video') ? type : 'content';
+    var category = node.getAttribute('data-f152-embed-category') || 'analytics';
+    var marketing = category === 'marketing';
+    var labelKey = 'embed_' + group + '_blocked' + (marketing ? '_marketing' : '');
+    var buttonKey = group === 'content' ? 'embed_allow' : 'embed_allow_' + group;
+    var strings = (CFG && CFG.i18n) || {};
+    var defaults = {
+      embed_map_blocked: 'Карта скрыта до разрешения аналитических cookie.',
+      embed_map_blocked_marketing: 'Карта скрыта до разрешения маркетинговых cookie.',
+      embed_reviews_blocked: 'Отзывы Яндекса скрыты до разрешения аналитических cookie.',
+      embed_reviews_blocked_marketing: 'Отзывы Яндекса скрыты до разрешения маркетинговых cookie.',
+      embed_video_blocked: 'Видео скрыто до разрешения аналитических cookie.',
+      embed_video_blocked_marketing: 'Видео скрыто до разрешения маркетинговых cookie.',
+      embed_content_blocked: 'Внешнее содержимое скрыто до разрешения аналитических cookie.',
+      embed_content_blocked_marketing: 'Внешнее содержимое скрыто до разрешения маркетинговых cookie.',
+      embed_allow_map: 'Разрешить и показать карту',
+      embed_allow_reviews: 'Разрешить и показать отзывы',
+      embed_allow_video: 'Разрешить и показать видео',
+      embed_allow: 'Разрешить и показать'
+    };
+    var label = placeholder.querySelector('.f152-embed-placeholder__text');
+    var button = placeholder.querySelector('.f152-embed-placeholder__button');
+    if (label) label.textContent = strings[labelKey] || defaults[labelKey];
+    if (button) button.textContent = strings[buttonKey] || defaults[buttonKey];
+  }
+
   function findEmbedPlaceholder(node) {
     if (!node || !node.parentNode) return null;
     var token = getEmbedToken(node);
@@ -274,6 +308,7 @@
 
     for (var i = 0; i < placeholders.length; i++) {
       if (!token || placeholders[i].getAttribute('data-f152-embed-token') === token) {
+        localizeEmbedPlaceholder(node, placeholders[i]);
         return placeholders[i];
       }
     }
@@ -308,6 +343,10 @@
       text.textContent = marketing
         ? ((CFG.i18n && CFG.i18n.embed_map_blocked_marketing) || 'Карта скрыта до разрешения маркетинговых cookie.')
         : ((CFG.i18n && CFG.i18n.embed_map_blocked) || 'Карта скрыта до разрешения аналитических cookie.');
+    } else if (type === 'reviews') {
+      text.textContent = marketing
+        ? ((CFG.i18n && CFG.i18n.embed_reviews_blocked_marketing) || 'Отзывы Яндекса скрыты до разрешения маркетинговых cookie.')
+        : ((CFG.i18n && CFG.i18n.embed_reviews_blocked) || 'Отзывы Яндекса скрыты до разрешения аналитических cookie.');
     } else if (type === 'video') {
       text.textContent = marketing
         ? ((CFG.i18n && CFG.i18n.embed_video_blocked_marketing) || 'Видео скрыто до разрешения маркетинговых cookie.')
@@ -324,6 +363,8 @@
     button.setAttribute('data-f152-embed-allow', frame.getAttribute('data-f152-embed-category') || 'analytics');
     if (type === 'map') {
       button.textContent = (CFG.i18n && CFG.i18n.embed_allow_map) || 'Разрешить и показать карту';
+    } else if (type === 'reviews') {
+      button.textContent = (CFG.i18n && CFG.i18n.embed_allow_reviews) || 'Разрешить и показать отзывы';
     } else if (type === 'video') {
       button.textContent = (CFG.i18n && CFG.i18n.embed_allow_video) || 'Разрешить и показать видео';
     } else {
@@ -334,6 +375,7 @@
     placeholder.appendChild(button);
     applyEmbedDimensions(placeholder, frame);
     frame.parentNode.insertBefore(placeholder, frame);
+    localizeEmbedPlaceholder(frame, placeholder);
     return placeholder;
   }
 

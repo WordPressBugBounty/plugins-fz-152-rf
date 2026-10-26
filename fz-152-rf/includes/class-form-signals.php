@@ -21,19 +21,18 @@ final class FormSignals {
 			$providers = [ 'wpcf7' => 'Contact Form 7', 'wpforms' => 'WPForms', 'frm-show-form' => 'Formidable Forms', 'formlayer' => 'FormLayer', 'srfm' => 'SureForms', 'sureforms' => 'SureForms', 'forminator' => 'Forminator', 'fluentform' => 'Fluent Forms', 'fluent' => 'Fluent Forms', 'nf-form' => 'Ninja Forms', 'gform' => 'Gravity Forms', 'metform' => 'MetForm', 'elementor' => 'Elementor Forms', 'wpdiscuz' => 'wpDiscuz', 'commentform' => 'Комментарии WordPress', 'registerform' => 'Регистрация WordPress', 'woocommerce' => 'WooCommerce', 'checkout' => 'WooCommerce', 'f152-quiz' => 'Quiz Forms' ];
 			$provider = 'Форма сайта';
 			foreach ( $providers as $needle => $label ) if ( false !== stripos( $context, $needle ) ) { $provider = $label; break; }
-			$woo_account = 'WooCommerce' === $provider && (bool) preg_match( '/woocommerce[-_ ](?:form[-_ ])?(?:login|register)|woocommerce[-_ ]myaccount|my[-_ ]account/i', $context );
-			$kind = preg_match( '/checkout/i', $context ) ? 'checkout' : ( preg_match( '/comment/i', $context ) ? 'comments' : ( $woo_account || preg_match( '/register|registration/i', $context ) ? 'registration' : 'form' ) );
+			$own_context = $form->getAttribute( 'class' ) . ' ' . $form->getAttribute( 'id' );
+			 
+			 
+			$woo_login = 'WooCommerce' === $provider && (bool) preg_match( '/woocommerce[-_ ]form[-_ ]login|(?:^|\s)login(?:\s|$)/i', $own_context );
+			$woo_register = 'WooCommerce' === $provider && (bool) preg_match( '/woocommerce[-_ ]form[-_ ]register|(?:^|\s)register(?:\s|$)/i', $own_context );
+			$kind = $woo_login ? 'login' : ( $woo_register ? 'registration' : ( preg_match( '/checkout/i', $own_context ) ? 'checkout' : ( preg_match( '/comment/i', $own_context ) ? 'comments' : ( preg_match( '/register|registration/i', $own_context ) ? 'registration' : 'form' ) ) ) );
+			if ( $woo_login ) continue;  
 			$fields = []; $types = []; $partial_name = false; $marketing = false; $consent = false; $count = 0;
 			foreach ( $xpath->query( './/input|.//select|.//textarea', $form ) as $field ) {
 				if ( ++$count > 250 ) break;
 				$type = strtolower( $field->getAttribute( 'type' ) ?: $field->tagName );
 				$name = $field->getAttribute( 'name' );
-				if ( 'checkbox' === $type ) {
-					if ( preg_match( '/f152.*marketing|marketing.*consent/i', $name ) ) $marketing = true;
-					if ( preg_match( '/f152.*consent/i', $name ) && ! preg_match( '/marketing|custom/i', $name ) ) $consent = true;
-				}
-				if ( self::hidden( $field, $form ) || preg_match( '/honeypot|honey.?pot/i', $name ) ) continue;
-				if ( in_array( $type, [ 'hidden','submit','button','reset','password','checkbox','radio' ], true ) || $field->hasAttribute( 'disabled' ) ) continue;
 				$id = $field->getAttribute( 'id' );
 				$placeholder = trim( $field->getAttribute( 'placeholder' ) );
 				$aria_label = trim( $field->getAttribute( 'aria-label' ) );
@@ -44,6 +43,15 @@ final class FormSignals {
 					if ( $ancestor === $form ) break;
 				}
 				$label = trim( preg_replace( '/\s+/u', ' ', $label ) );
+				if ( 'checkbox' === $type && ! self::hidden( $field, $form ) && ! $field->hasAttribute( 'disabled' ) ) {
+					$checkbox_text = trim( $name . ' ' . $id . ' ' . $field->getAttribute( 'value' ) . ' ' . $label );
+					$is_marketing = (bool) preg_match( '/marketing|newsletter|subscribe|promo|advert|реклам|рассыл|новост/iu', $checkbox_text );
+					$is_pd = 'f152_consent_register' === $name || (bool) preg_match( '/f152.*consent|personal[ _-]?data|privacy|152[ _-]?fz|152[ _-]?фз|персональн[^\s]{0,12}[ \-_]*(?:данн|информац)|обработк[^\s]{0,12}[ \-_]*(?:данн|персональн)|политик[^\s]{0,12}[ \-_]*(?:конфиденц|обработк)|соглас[^\n]{0,40}(?:обработ|персональн)/iu', $checkbox_text );
+					if ( $is_marketing ) $marketing = true;
+					if ( $is_pd ) $consent = true;
+				}
+				if ( self::hidden( $field, $form ) || preg_match( '/honeypot|honey.?pot/i', $name ) ) continue;
+				if ( in_array( $type, [ 'hidden','submit','button','reset','password','checkbox','radio' ], true ) || $field->hasAttribute( 'disabled' ) ) continue;
 				$auto_raw = strtolower( trim( $field->getAttribute( 'autocomplete' ) ) );
 				$auto_parts = preg_split( '/\s+/', $auto_raw );
 				$auto = is_array( $auto_parts ) && $auto_parts ? (string) end( $auto_parts ) : $auto_raw;

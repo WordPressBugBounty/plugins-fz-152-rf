@@ -58,8 +58,8 @@ final class Integrations {
 		if ( ! $is_product && ! $enable_comments ) return;
 
 		$text_raw = $is_product
-			? (string) get_option('f152_reviews_text', Helpers::default_personal_consent_text())
-			: (string) get_option('f152_comment_text', Helpers::default_personal_consent_text());
+			? (string) Helpers::text_option( 'f152_reviews_text', Helpers::default_personal_consent_text() )
+			: (string) Helpers::text_option( 'f152_comment_text', Helpers::default_personal_consent_text() );
 
 		$text = Helpers::kses_paragraph( Helpers::replace_common_macros( $text_raw ) );
 
@@ -305,12 +305,12 @@ final class Integrations {
                                 $user_agent = sanitize_text_field( wp_unslash( $_SERVER['HTTP_USER_AGENT'] ?? '' ) );
 
                                 $consent_text_raw = $is_product
-                                        ? get_option('f152_reviews_text', Helpers::default_personal_consent_text())
-                                        : get_option('f152_comment_text', Helpers::default_personal_consent_text());
+                                        ? Helpers::text_option( 'f152_reviews_text', Helpers::default_personal_consent_text() )
+                                        : Helpers::text_option( 'f152_comment_text', Helpers::default_personal_consent_text() );
                                 $consent_text = Helpers::replace_common_macros($consent_text_raw);
 
                                 $policy_version = API::get_policy_version();
-                                $policy_url = get_option('f152_link_policy_pd', '');
+                                $policy_url = Helpers::document_url( 'f152_link_policy_pd' );
 
                                 $logged = \F152\ConsentLog::log([
                                         'source_type' => $source_type,
@@ -345,7 +345,7 @@ final class Integrations {
 			return '';
 		}
 
-		$text_raw = (string) get_option( 'f152_checkout_text', Helpers::default_personal_consent_text() );
+		$text_raw = (string) Helpers::text_option( 'f152_checkout_text', Helpers::default_personal_consent_text() );
 		$text     = Helpers::kses_paragraph( Helpers::replace_common_macros( $text_raw ) );
 		$nonce    = wp_create_nonce( 'f152_checkout_consent' );
 
@@ -363,7 +363,7 @@ final class Integrations {
 			return;
 		}
 
-		$text_raw = (string) get_option('f152_register_text', Helpers::default_personal_consent_text());
+		$text_raw = (string) Helpers::text_option( 'f152_register_text', Helpers::default_personal_consent_text() );
 		$text     = Helpers::kses_paragraph( Helpers::replace_common_macros( $text_raw ) );
 
 		?>
@@ -487,9 +487,9 @@ final class Integrations {
 				'user_id'        => $user_id,
 				'ip_address'     => sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ?? '' ) ),
 				'user_agent'     => sanitize_text_field( wp_unslash( $_SERVER['HTTP_USER_AGENT'] ?? '' ) ),
-				'consent_text'   => Helpers::replace_common_macros( get_option( 'f152_register_text', Helpers::default_personal_consent_text() ) ),
+				'consent_text'   => Helpers::replace_common_macros( Helpers::text_option( 'f152_register_text', Helpers::default_personal_consent_text() ) ),
 				'policy_version' => API::get_policy_version(),
-				'policy_url'     => get_option( 'f152_link_policy_pd', '' ),
+				'policy_url'     => Helpers::document_url( 'f152_link_policy_pd' ),
 				'source_plugin'  => 'woocommerce',
 				'source_label'   => 'WooCommerce registration',
 				'page_url'       => $page_url,
@@ -638,7 +638,7 @@ final class Integrations {
 
 	public static function get_block_checkout_label_html( ?string $raw_text = null ) : string {
 		if ( null === $raw_text ) {
-			$raw_text = (string) get_option( 'f152_checkout_text', Helpers::default_personal_consent_text() );
+			$raw_text = (string) Helpers::text_option( 'f152_checkout_text', Helpers::default_personal_consent_text() );
 		}
 
 		if ( '' === trim( $raw_text ) ) {
@@ -739,10 +739,10 @@ final class Integrations {
 			$user_agent = sanitize_text_field( wp_unslash( $_SERVER['HTTP_USER_AGENT'] ?? '' ) );
 		}
 
-		$consent_text_raw = get_option( 'f152_checkout_text', Helpers::default_personal_consent_text() );
+		$consent_text_raw = Helpers::text_option( 'f152_checkout_text', Helpers::default_personal_consent_text() );
 		$consent_text     = Helpers::replace_common_macros( $consent_text_raw );
 		$policy_version   = API::get_policy_version();
-		$policy_url       = get_option( 'f152_link_policy_pd', '' );
+		$policy_url       = Helpers::document_url( 'f152_link_policy_pd' );
 
 		$logged = \F152\ConsentLog::log(
 			[

@@ -7,9 +7,9 @@ final class ServiceScanner {
 
 	private const TRANSIENT_TTL          = 10 * MINUTE_IN_SECONDS;
 	private const RESPONSE_LIMIT         = 5 * MB_IN_BYTES;
-	private const TRANSIENT_KEY          = 'f152_service_scan_site_v28';
-	private const BROWSER_TRANSIENT_KEY  = 'f152_service_scan_browser_site_v6';
-	private const BROWSER_WORK_KEY       = 'f152_service_scan_browser_work_v1';
+	private const TRANSIENT_KEY          = 'f152_service_scan_site_v31';
+	private const BROWSER_TRANSIENT_KEY  = 'f152_service_scan_browser_site_v10';
+	private const BROWSER_WORK_KEY       = 'f152_service_scan_browser_work_v4';
 	private const BROWSER_LOCK_KEY       = 'f152_service_scan_browser_lock_v1';
 	private const BROWSER_LOCK_TTL       = 90;
 	private const BROWSER_TRANSIENT_TTL  = 10 * MINUTE_IN_SECONDS;
@@ -184,6 +184,11 @@ final class ServiceScanner {
 		self::release_browser_scan_lock();
 		delete_transient( 'f152_service_scan_browser_home_v2' );
 		delete_transient( 'f152_service_scan_browser_site_v4' );
+		delete_transient( 'f152_service_scan_browser_site_v8' );
+		delete_transient( 'f152_service_scan_browser_site_v9' );
+		delete_transient( 'f152_service_scan_browser_work_v3' );
+		delete_transient( 'f152_service_scan_site_v29' );
+		delete_transient( 'f152_service_scan_site_v30' );
 	}
 
 	public static function clear_server_cache(): void {
@@ -245,6 +250,8 @@ final class ServiceScanner {
 			'ok'         => false,
 			'url'        => home_url( '/' ),
 			'scanned_at' => 0,
+			'forms'      => [],
+			'external_domains' => [],
 			'services'   => self::empty_service_results( self::definitions() ),
 			'scan_meta'  => [
 				'home_ok'              => false,
@@ -276,6 +283,8 @@ final class ServiceScanner {
 			'ok'         => false,
 			'url'        => home_url( '/' ),
 			'scanned_at' => 0,
+			'forms'      => [],
+			'external_domains' => [],
 			'services'   => self::empty_service_results( self::definitions() ),
 			'scan_meta'  => [
 				'suppressed' => true,
@@ -290,7 +299,17 @@ final class ServiceScanner {
 		$hard_limit = 200;
 		$definitions = self::definitions();
 		$home_url = home_url( '/' );
-		$targets = [ [ 'url' => $home_url, 'title' => __( 'Главная страница', 'fz-152-rf' ), 'home' => true ] ];
+		 
+		 
+		 
+		$myaccount_id = function_exists( 'wc_get_page_id' ) ? (int) wc_get_page_id( 'myaccount' ) : 0;
+		$front_page_id = (int) get_option( 'page_on_front', 0 );
+		$targets = [ [
+			'url' => $home_url,
+			'title' => __( 'Главная страница', 'fz-152-rf' ),
+			'home' => true,
+			'guest' => $myaccount_id > 0 && $myaccount_id === $front_page_id,
+		] ];
 		$page_ids = get_posts( [
 			'post_type' => 'page',
 			'post_status' => 'publish',
@@ -332,7 +351,6 @@ final class ServiceScanner {
 		}
 		$priority_ids = array_values( array_unique( $priority_ids ) );
 
-		$front_page_id = (int) get_option( 'page_on_front', 0 );
 		$priority = [];
 		$candidates = [];
 		$others = [];
@@ -349,6 +367,7 @@ final class ServiceScanner {
 					$page_id
 				),
 				'home' => false,
+				'guest' => $myaccount_id > 0 && $page_id === $myaccount_id,
 			];
 			if ( in_array( $page_id, $priority_ids, true ) ) {
 				$priority[] = $item;
@@ -407,6 +426,7 @@ final class ServiceScanner {
 		$plan = self::get_browser_scan_plan();
 		$work = [
 			'forms' => [],
+			'external_domains' => [],
 			'previous_fingerprint' => is_array( $previous ) ? self::service_fingerprint( (array) ( $previous['services'] ?? [] ) ) : '',
 			'services' => self::empty_service_results( self::definitions() ),
 			'scan_meta' => [
@@ -451,6 +471,12 @@ final class ServiceScanner {
 			] );
 		}
 		$work['forms'] = self::merge_form_signals( (array) ( $work['forms'] ?? [] ), FormSignals::extract( $html, $url, $title ) );
+		if ( class_exists( '\F152\ExternalDomainSignals' ) ) {
+			$work['external_domains'] = ExternalDomainSignals::merge(
+				(array) ( $work['external_domains'] ?? [] ),
+				ExternalDomainSignals::extract( $html, $url, $title )
+			);
+		}
 		$work['services'] = $services;
 		$work['scan_meta']['rendered_pages'] = (int) ( $work['scan_meta']['rendered_pages'] ?? 0 ) + 1;
 		if ( $home ) {
@@ -540,6 +566,7 @@ final class ServiceScanner {
 			'scanned_at' => time(),
 			'forms' => (array) ( $work['forms'] ?? [] ),
 			'form_signals_available' => class_exists( '\DOMDocument' ),
+			'external_domains' => (array) ( $work['external_domains'] ?? [] ),
 			'fingerprint' => $fingerprint,
 			'services' => $services,
 			'scan_meta' => $work['scan_meta'],
@@ -577,7 +604,7 @@ final class ServiceScanner {
 					'provider_id' => 'registration', 'title' => 'Мой аккаунт', 'page_title' => get_the_title( $account_id ) ?: 'Мой аккаунт',
 					'url' => $url, 'urls' => [ $url ], 'occurrences' => 1,
 					'types' => 'yes' === (string) get_option( 'woocommerce_enable_myaccount_registration', 'no' ) ? [ 'email' ] : [],
-					'partial_name' => false, 'marketing' => false, 'fields' => [], 'submit_text' => '', 'evidence' => 'woocommerce_myaccount_page',
+					'partial_name' => false, 'marketing' => false, 'consent' => false, 'fields' => [], 'submit_text' => '', 'evidence' => 'woocommerce_myaccount_page',
 				];
 			}
 		}

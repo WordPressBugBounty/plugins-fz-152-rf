@@ -39,6 +39,7 @@ final class Banner {
 			'f152_banner_text',
 			Helpers::default_banner_text()
 		);
+		$raw = Helpers::text_option( 'f152_banner_text', $raw );
 
 		$parts   = Helpers::split_banner_content( $raw );
 		$message = Helpers::kses_paragraph( $parts['message'] );
@@ -78,10 +79,10 @@ final class Banner {
 			return;
 		}
 
-		$upper = (string) get_option( 'f152_popup_upper', '' );
-		$f_txt = (string) get_option( 'f152_popup_func', '' );
-		$a_txt = (string) get_option( 'f152_popup_anal', '' );
-		$m_txt = (string) get_option( 'f152_popup_mark', '' );
+		$upper = Helpers::text_option( 'f152_popup_upper', '' );
+		$f_txt = Helpers::text_option( 'f152_popup_func', '' );
+		$a_txt = Helpers::text_option( 'f152_popup_anal', '' );
+		$m_txt = Helpers::text_option( 'f152_popup_mark', '' );
 
 		if ( $upper === '' ) {
 			$upper = \F152\Templates::default_for_option( 'f152_popup_upper' );
@@ -108,9 +109,9 @@ final class Banner {
 			<div class="f152-popup__overlay" data-f152-close></div>
 
 			<div class="f152-popup__window" role="document" tabindex="-1">
-				<button type="button" class="f152-popup__close" aria-label="<?php echo esc_attr__( 'Закрыть', 'fz-152-rf' ); ?>" data-f152-close>×</button>
+				<button type="button" class="f152-popup__close" aria-label="<?php echo esc_attr( Helpers::ui_label( 'close', __( 'Закрыть', 'fz-152-rf' ) ) ); ?>" data-f152-close>×</button>
 
-				<h3 class="f152-popup__title"><?php echo esc_html__( 'Настройка файлов cookie', 'fz-152-rf' ); ?></h3>
+				<h3 class="f152-popup__title"><?php echo esc_html( Helpers::ui_label( 'popup_title', __( 'Настройка файлов cookie', 'fz-152-rf' ) ) ); ?></h3>
 
 				<div class="f152-popup__content">
 					<div class="f152-popup__intro">
@@ -120,7 +121,7 @@ final class Banner {
 					<div class="f152-popup__group">
 						<label class="f152-row">
 							<input type="checkbox" checked disabled>
-							<span class="f152-row__title"><strong><?php echo esc_html__( 'Функциональные/технические файлы cookie', 'fz-152-rf' ); ?></strong></span>
+							<span class="f152-row__title"><strong><?php echo esc_html( Helpers::ui_label( 'functional_title', __( 'Функциональные/технические файлы cookie', 'fz-152-rf' ) ) ); ?></strong></span>
 							<small class="f152-row__desc"><?php echo wp_kses_post( $f_txt ); ?></small>
 						</label>
 					</div>
@@ -128,7 +129,7 @@ final class Banner {
 					<div class="f152-popup__group">
 						<label class="f152-row">
 							<input type="checkbox" data-f152-cat="analytics"<?php echo esc_attr( $chk ); ?>>
-							<span class="f152-row__title"><strong><?php echo esc_html__( 'Аналитические файлы cookie', 'fz-152-rf' ); ?></strong></span>
+							<span class="f152-row__title"><strong><?php echo esc_html( Helpers::ui_label( 'analytics_title', __( 'Аналитические файлы cookie', 'fz-152-rf' ) ) ); ?></strong></span>
 							<small class="f152-row__desc"><?php echo wp_kses_post( $a_txt ); ?></small>
 						</label>
 					</div>
@@ -136,7 +137,7 @@ final class Banner {
 					<div class="f152-popup__group">
 						<label class="f152-row">
 							<input type="checkbox" data-f152-cat="marketing"<?php echo esc_attr( $chk ); ?>>
-							<span class="f152-row__title"><strong><?php echo esc_html__( 'Рекламные/маркетинговые файлы cookie', 'fz-152-rf' ); ?></strong></span>
+							<span class="f152-row__title"><strong><?php echo esc_html( Helpers::ui_label( 'marketing_title', __( 'Рекламные/маркетинговые файлы cookie', 'fz-152-rf' ) ) ); ?></strong></span>
 							<small class="f152-row__desc"><?php echo wp_kses_post( $m_txt ); ?></small>
 						</label>
 					</div>
@@ -145,7 +146,7 @@ final class Banner {
 				<div class="f152-popup__actions">
 					<?php echo wp_kses( Helpers::button_html( 'accept' ), self::allowed_actions_html() ); ?>
 					<?php echo wp_kses( Helpers::button_html( 'reject' ), self::allowed_actions_html() ); ?>
-					<button type="button" class="f152-btn f152-btn--save" data-f152-save><?php echo esc_html__( 'Сохранить', 'fz-152-rf' ); ?></button>
+					<button type="button" class="f152-btn f152-btn--save" data-f152-save><?php echo esc_html( Helpers::ui_label( 'save', __( 'Сохранить', 'fz-152-rf' ) ) ); ?></button>
 				</div>
 			</div>
 		</div>

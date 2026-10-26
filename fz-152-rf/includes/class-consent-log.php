@@ -8,7 +8,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 // phpcs:disable WordPress.DB.DirectDatabaseQuery
 final class ConsentLog {
 
-	private const DB_VERSION = '3';
+	private const DB_VERSION = '4';
 
 	public static function get_table_name(): string {
 		global $wpdb;
@@ -45,6 +45,7 @@ final class ConsentLog {
 			consent_text TEXT DEFAULT NULL,
 			policy_version VARCHAR(50) DEFAULT NULL,
 			policy_url VARCHAR(500) DEFAULT NULL,
+			language VARCHAR(20) DEFAULT NULL,
 			source_uid VARCHAR(191) DEFAULT NULL,
 			source_plugin VARCHAR(100) DEFAULT NULL,
 			source_label VARCHAR(255) DEFAULT NULL,
@@ -172,6 +173,7 @@ final class ConsentLog {
 			'consent_text'   => wp_kses_post( $data['consent_text'] ?? '' ),
 			'policy_version' => $policy_version,
 			'policy_url'     => esc_url_raw( $data['policy_url'] ?? '' ),
+			'language'       => isset( $data['language'] ) && is_scalar( $data['language'] ) ? substr( sanitize_key( (string) $data['language'] ), 0, 20 ) : null,
 			'source_uid'     => $source_uid !== '' ? mb_substr( sanitize_text_field( $source_uid ), 0, 191 ) : null,
 			'source_plugin'  => isset( $data['source_plugin'] ) && is_scalar( $data['source_plugin'] )
 				? mb_substr( sanitize_text_field( (string) $data['source_plugin'] ), 0, 100 ) : null,
@@ -217,7 +219,8 @@ final class ConsentLog {
 			'%s',  
 			'%s',  
 			'%s',  
-		];
+					'%s',  
+];
 
 		$result = $wpdb->insert( $table_name, $insert_data, $format );
 

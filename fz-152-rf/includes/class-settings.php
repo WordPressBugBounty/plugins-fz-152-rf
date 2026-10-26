@@ -395,7 +395,7 @@ final class Settings {
 			$_GET['subtab'] = $legacy;
 		}
 
-		$allowed_tabs = [ 'main', 'services', 'texts', 'policy_pd', 'consent_pd', 'policy_cookie', 'consent_marketing', 'logs', 'stats', 'integrations', 'rkn', 'custom_css', 'api' ];
+		$allowed_tabs = apply_filters( 'f152/admin/allowed_tabs', [ 'main', 'services', 'texts', 'policy_pd', 'consent_pd', 'policy_cookie', 'consent_marketing', 'logs', 'stats', 'integrations', 'rkn', 'languages', 'custom_css', 'api' ] );
 		if ( ! in_array( $tab, $allowed_tabs, true ) ) {
 			$tab = 'main';
 		}
@@ -423,6 +423,8 @@ final class Settings {
 			                             <a href="<?php echo esc_url( self::tab_url('stats') ); ?>" class="nav-tab <?php echo esc_attr( $tab==='stats'?'nav-tab-active':'' ); ?>">Статистика</a>
 			                             <a href="<?php echo esc_url( self::tab_url('integrations') ); ?>" class="nav-tab f152-nav-tab-pro <?php echo esc_attr( $tab==='integrations'?'nav-tab-active':'' ); ?>"><?php echo esc_html( apply_filters( 'f152_integrations_tab_label', 'Add-on' ) ); ?></a>
 			                             <a href="<?php echo esc_url( self::tab_url('rkn') ); ?>" class="nav-tab f152-nav-tab-pro <?php echo esc_attr( $tab==='rkn'?'nav-tab-active':'' ); ?>">Роскомнадзор</a>
+			                             <a href="<?php echo esc_url( self::tab_url('languages') ); ?>" class="nav-tab f152-nav-tab-pro <?php echo esc_attr( $tab==='languages'?'nav-tab-active':'' ); ?>">Языки</a>
+			                             <?php do_action( 'f152/admin/tabs', $tab ); ?>
 			                             <a href="<?php echo esc_url( self::tab_url('custom_css') ); ?>" class="nav-tab <?php echo esc_attr( $tab==='custom_css'?'nav-tab-active':'' ); ?>">Кастомный CSS</a>
 			                             <a href="<?php echo esc_url( self::tab_url('api') ); ?>" class="nav-tab <?php echo esc_attr( $tab==='api'?'nav-tab-active':'' ); ?>">API для разработчиков</a>
 			</h2>
@@ -437,6 +439,12 @@ final class Settings {
 					<?php submit_button('Сохранить изменения'); ?>
 				</form>
 				<?php
+			} elseif ( $tab === 'languages' ) {
+				if ( has_action( 'f152/admin/render_languages' ) ) {
+					do_action( 'f152/admin/render_languages' );
+				} else {
+					self::render_locked_languages_tab();
+				}
 			} elseif ( $tab === 'services' ) {
 				self::render_tab_services();
 			} elseif ( $tab === 'texts' ) {
@@ -566,23 +574,24 @@ final class Settings {
 
 				<div class="f152-service-card" data-f152-service-category="maps">
 				<div class="f152-field">
-					<h3>Яндекс.Карты</h3>
-					<p class="description">FZ-152 RF может блокировать загрузку кода конструктора и iframe Яндекс.Карт до решения посетителя по аналитическим cookie.</p>
+					<h3>Яндекс.Карты и отзывы</h3>
+					<p class="description">FZ-152 RF управляет загрузкой карт из конструктора, iframe Яндекс.Карт и официального виджета отзывов Яндекс.Карт (maps-reviews-widget). Для всех действует один режим по аналитическим cookie.</p>
 				</div>
 
 				<?php $yandex_maps_behavior = self::get_yandex_maps_behavior(); ?>
 				<div class="f152-field">
-					<label for="f152_yandex_maps_behavior">Показ встроенных Яндекс.Карт</label>
+					<label for="f152_yandex_maps_behavior">Показ карт и отзывов Яндекса</label>
 					<select id="f152_yandex_maps_behavior" name="f152_yandex_maps_behavior">
 						<option value="always" <?php selected( $yandex_maps_behavior, 'always' ); ?>>Всегда показывать</option>
 						<option value="disable_on_reject" <?php selected( $yandex_maps_behavior, 'disable_on_reject' ); ?>>Скрывать после нажатия «Отклонить»</option>
 						<option value="require_accept" <?php selected( $yandex_maps_behavior, 'require_accept' ); ?>>Показывать только после «Принять»</option>
 					</select>
 					<small>
-						<b>Всегда показывать</b> — карта загружается независимо от решения посетителя.<br>
-						<b>Скрывать после нажатия «Отклонить»</b> — карта доступна до явного отказа от аналитических cookie; после отказа вместо неё показывается заглушка.<br>
-						<b>Показывать только после «Принять»</b> — код конструктора/iframe карты не загружается до явного разрешения аналитических cookie.<br>
-						Если карта скрыта, кнопка «Разрешить и показать карту» включает только аналитические cookie и сразу загружает карту, не включая маркетинговые cookie.<br>
+						<b>Всегда показывать</b> — карты и отзывы загружаются независимо от решения посетителя.<br>
+						<b>Скрывать после нажатия «Отклонить»</b> — карты и отзывы доступны до явного отказа от аналитических cookie; после отказа вместо них показывается заглушка.<br>
+						<b>Показывать только после «Принять»</b> — код конструктора/iframe карты и виджета отзывов не загружается до явного разрешения аналитических cookie.<br>
+						Если виджет скрыт, кнопка «Разрешить и показать карту» или «Разрешить и показать отзывы» включает только аналитические cookie и сразу загружает виджет, не включая маркетинговые cookie.<br>
+						Поддерживается стандартный iframe-код Яндекс Отзывов, присутствующий в HTML страницы. Виджеты, добавляемые сторонними скриптами уже после загрузки страницы, могут требовать отдельной интеграции.<br>
 						FZ-152 выдаёт для кэшируемых страниц нейтральный код карты: решение конкретного посетителя применяется уже в его браузере. Это совместимо с full-page cache. При изменении настроек FZ-152 автоматически очищает WP Rocket; дополнительный серверный/CDN-кэш (например Nginx FastCGI Cache, Varnish или кэш хостинга) нужно очистить средствами сервера/хостинга либо дождаться его TTL.
 					</small>
 				</div>
@@ -600,6 +609,8 @@ final class Settings {
 					<?php self::render_rutube_pro_preview(); ?>
 					<?php self::render_youtube_pro_preview(); ?>
 					<?php self::render_dzen_video_pro_preview(); ?>
+					<?php self::render_custom_services_pro_preview(); ?>
+					<?php self::render_custom_iframe_pro_preview(); ?>
 					<?php self::render_ga4_pro_preview(); ?>
 					<?php self::render_gtm_pro_preview(); ?>
 					<?php self::render_roistat_pro_preview(); ?>
@@ -841,6 +852,53 @@ final class Settings {
 				<div class="f152-service-preview__control f152-service-preview__control--select" aria-hidden="true">Показывать только после «Принять»</div>
 			</div>
 			<p class="description f152-service-card__pro-note">Эта интеграция поставляется отдельным дополнением FZ-152 RF Pro. Бесплатный плагин может обнаружить iframe Дзена при проверке сайта, но не управляет его загрузкой.</p>
+			<?php if ( ! empty( $buy_url ) ) : ?>
+				<p><a class="button" href="<?php echo esc_url( $buy_url ); ?>" target="_blank" rel="noopener noreferrer">Подробнее о Pro</a></p>
+			<?php endif; ?>
+		</div>
+		<?php
+	}
+
+	 
+	private static function render_custom_services_pro_preview() : void {
+		$buy_url = apply_filters( 'f152_pro_buy_url', add_query_arg( [ 'utm_source' => 'free_plugin', 'utm_medium' => 'services_tab', 'utm_campaign' => 'pro_upgrade', 'utm_content' => 'custom_services' ], F152_PURCHASE_URL ) );
+		?>
+		<div class="f152-service-card f152-service-card--pro-preview" data-f152-service-category="trackers">
+			<div class="f152-service-card__heading">
+				<div>
+					<h3>Пользовательские сервисы и скрипты</h3>
+					<p class="description">Подключение собственного кода сторонних сервисов с управлением загрузкой по категориям cookie и решению посетителя.</p>
+				</div>
+				<span class="f152-service-card__badge">PRO</span>
+			</div>
+			<div class="f152-field">
+				<span class="f152-service-preview__label">Название, категория, режим загрузки и код скрипта</span>
+				<div class="f152-service-preview__control" aria-hidden="true">Собственный сервис · включать после согласия</div>
+			</div>
+			<p class="description f152-service-card__pro-note">Пользовательские скрипты доступны в FZ-152 RF Pro. В Free этот блок служит только для ознакомления — код не запускается.</p>
+			<?php if ( ! empty( $buy_url ) ) : ?>
+				<p><a class="button" href="<?php echo esc_url( $buy_url ); ?>" target="_blank" rel="noopener noreferrer">Подробнее о Pro</a></p>
+			<?php endif; ?>
+		</div>
+		<?php
+	}
+
+	private static function render_custom_iframe_pro_preview() : void {
+		$buy_url = apply_filters( 'f152_pro_buy_url', add_query_arg( [ 'utm_source' => 'free_plugin', 'utm_medium' => 'services_tab', 'utm_campaign' => 'pro_upgrade', 'utm_content' => 'custom_iframes' ], F152_PURCHASE_URL ) );
+		?>
+		<div class="f152-service-card f152-service-card--pro-preview" data-f152-service-category="trackers">
+			<div class="f152-service-card__heading">
+				<div>
+					<h3>Пользовательские iframe</h3>
+					<p class="description">Управление загрузкой сторонних iframe по адресу или домену: отдельные правила, категории cookie и режимы согласия.</p>
+				</div>
+				<span class="f152-service-card__badge">PRO</span>
+			</div>
+			<div class="f152-field">
+				<span class="f152-service-preview__label">URL или домен iframe</span>
+				<div class="f152-service-preview__control f152-service-preview__control--select" aria-hidden="true">widget.example.com/embed/</div>
+			</div>
+			<p class="description f152-service-card__pro-note">Произвольные iframe на страницах управляются дополнением FZ-152 RF Pro. В базовой версии доступны только встроенные поддерживаемые сервисы.</p>
 			<?php if ( ! empty( $buy_url ) ) : ?>
 				<p><a class="button" href="<?php echo esc_url( $buy_url ); ?>" target="_blank" rel="noopener noreferrer">Подробнее о Pro</a></p>
 			<?php endif; ?>
@@ -1302,6 +1360,20 @@ final class Settings {
 		$detection_basis = sanitize_key( (string) ( $issue['detection_basis'] ?? 'confirmed' ) );
 		$texts_url = self::subtab_url( 'policy_pd' );
 
+		 
+		$multilingual = class_exists( '\F152\MultilingualSafety' ) && MultilingualSafety::is_multilingual();
+		if ( $multilingual && 'managed' === $mode && 'data_transfer' !== $category ) {
+			return [
+				'message' => $pro_active
+					? sprintf( 'Сервис «%s» обнаружен, но его описание не подтверждено во всех доступных языковых версиях политики. Проверьте выбранные сервисы и выполните синхронное обновление документов во вкладке «Языки». Существующие ручные правки защищены.', $label )
+					: sprintf( 'Сервис «%s» обнаружен, но его описание не найдено в проверенных языковых версиях политики. Проверьте обе версии вручную; автоматическое обновление переводов доступно в Pro.', $label ),
+				'url' => $pro_active ? self::tab_url( 'languages' ) : $texts_url,
+				'button' => $pro_active ? 'Открыть генератор RU / EN' : 'Открыть тексты',
+				'external' => false,
+				'chip' => 'Проверьте языковые версии',
+			];
+		}
+
 		if ( 'data_transfer' === $category ) {
 			$plugin_name = '';
 			if ( ! empty( $issue['active_plugins'] ) && is_array( $issue['active_plugins'] ) ) {
@@ -1327,7 +1399,7 @@ final class Settings {
 
 			if ( $pro_active ) {
 				return [
-					'message' => $reason . ' В Pro откройте «Тексты» → «Политика обработки ПД» и отметьте этот сервис, если интеграция действительно используется. Pro добавит и дальше будет поддерживать нужный блок автоматически.',
+					'message' => $reason . ( $multilingual ? ' Если передача действительно используется, отметьте её во вкладке «Языки» и обновите документы RU / EN через генератор.' : ' В Pro откройте «Тексты» → «Политика обработки ПД» и отметьте этот сервис, если интеграция действительно используется. Pro добавит и дальше будет поддерживать нужный блок автоматически.' ),
 					'url'     => '',
 					'button'  => '',
 					'external'=> false,
@@ -1375,7 +1447,7 @@ final class Settings {
 				: sprintf( 'Мы нашли на сайте «%s», а в политиках нет нужного текста.', $label );
 			if ( $pro_active ) {
 				return [
-					'message' => $intro . ' Откройте вкладку «Тексты» → «Политика обработки ПД», отметьте этот сервис в блоке Pro и нажмите «Сохранить». Если страницы политик созданы FZ-152, Pro добавит нужный текст и дальше сможет обновлять его автоматически.',
+					'message' => $intro . ( $multilingual ? ' Откройте вкладку «Языки», выберите сервис и обновите документы. Обычная синхронизация вкладки «Тексты» не изменяет переводы.' : ' Откройте вкладку «Тексты» → «Политика обработки ПД», отметьте этот сервис в блоке Pro и нажмите «Сохранить». Если страницы политик созданы FZ-152, Pro добавит нужный текст и дальше сможет обновлять его автоматически.' ),
 					'url'     => '',
 					'button'  => '',
 					'external'=> false,
@@ -1399,8 +1471,42 @@ final class Settings {
 		];
 	}
 
+	private static function render_scanner_check_item( array $scanner_check ) : void {
+		$severity = sanitize_key( (string) ( $scanner_check['severity'] ?? 'info' ) );
+		$chip_class = 'success' === $severity ? 'f152-status-chip--success' : ( in_array( $severity, [ 'warning', 'error' ], true ) ? 'f152-status-chip--attention' : 'f152-status-chip--info' );
+		$icon = sanitize_key( (string) ( $scanner_check['icon'] ?? 'info-outline' ) );
+		$evidence = isset( $scanner_check['evidence'] ) && is_array( $scanner_check['evidence'] ) ? $scanner_check['evidence'] : [];
+		$location_labels = [];
+		foreach ( array_slice( (array) ( $evidence['urls'] ?? [] ), 0, 3 ) as $location_url ) {
+			if ( is_string( $location_url ) && '' !== $location_url ) $location_labels[] = $location_url;
+		}
+		foreach ( array_slice( (array) ( $evidence['locations'] ?? [] ), 0, 3 ) as $location ) {
+			if ( ! is_array( $location ) ) continue;
+			$location_labels[] = ! empty( $location['title'] ) ? (string) $location['title'] : (string) ( $location['url'] ?? '' );
+		}
+		$location_labels = array_values( array_unique( array_filter( $location_labels ) ) );
+		$recommendation = trim( (string) ( $scanner_check['recommendation'] ?? '' ) );
+		$message = trim( (string) ( $scanner_check['message'] ?? '' ) );
+		?>
+		<div class="f152-audit-item f152-audit-item--<?php echo esc_attr( $severity ); ?>">
+			<div class="f152-audit-item__icon"><span class="dashicons dashicons-<?php echo esc_attr( $icon ); ?>" aria-hidden="true"></span></div>
+			<div class="f152-audit-item__body">
+				<div class="f152-audit-item__title"><strong><?php echo esc_html( (string) ( $scanner_check['title'] ?? '' ) ); ?></strong><span class="f152-status-chip <?php echo esc_attr( $chip_class ); ?>"><?php echo esc_html( (string) ( $scanner_check['chip'] ?? 'Информация' ) ); ?></span></div>
+				<?php if ( '' !== $message ) : ?><p><?php echo esc_html( $message ); ?></p><?php endif; ?>
+				<?php if ( '' !== $recommendation && $recommendation !== $message ) : ?><p class="f152-audit-item__recommendation"><strong>Что делать:</strong> <?php echo esc_html( $recommendation ); ?></p><?php endif; ?>
+				<?php if ( ! empty( $location_labels ) ) : ?><p class="f152-audit-item__meta">Страница: <?php echo esc_html( implode( ', ', $location_labels ) ); ?></p><?php endif; ?>
+				<?php if ( ! empty( $evidence['resources'] ) ) : ?><p class="f152-audit-item__meta">Пример подключения: <?php echo esc_html( implode( ', ', array_slice( (array) $evidence['resources'], 0, 2 ) ) ); ?></p><?php endif; ?>
+				<?php if ( ! empty( $evidence['ids'] ) ) : ?><p class="f152-audit-item__meta">ID сервиса: <?php echo esc_html( implode( ', ', array_slice( (array) $evidence['ids'], 0, 3 ) ) ); ?></p><?php endif; ?>
+			</div>
+		</div>
+		<?php
+	}
+
 	private static function render_tab_main() : void {
 		$pro_active = self::is_pro_license_active();
+		$multilingual_providers = class_exists( '\F152\MultilingualSafety' ) ? MultilingualSafety::providers() : [];
+		$multilingual_detected = count( $multilingual_providers ) > 0;
+		$multilingual_without_pro = $multilingual_detected && ! $pro_active;
 		$tracker_issues = class_exists( '\F152\ServiceScanner' )
 			? \F152\ServiceScanner::get_issues()
 			: [];
@@ -1414,7 +1520,7 @@ final class Settings {
 		$scan_failed_pages = isset( $scan_meta['failed_pages'] ) ? max( 0, (int) $scan_meta['failed_pages'] ) : 0;
 		$scan_pending = ! empty( $scan_meta['browser_pending'] );
 		$scan_complete = ! empty( $scan_meta['browser_complete'] );
-		$scan_incomplete = ! $scan_pending && ( ! $scan_home_ok || $scan_failed_pages > 0 );
+		$scan_incomplete = $scan_complete && ( ! $scan_home_ok || $scan_failed_pages > 0 );
 		$detected_frontend_labels = [];
 		$scan_services = isset( $scan_snapshot['services'] ) && is_array( $scan_snapshot['services'] ) ? $scan_snapshot['services'] : [];
 		foreach ( $scan_services as $service_id => $detection ) {
@@ -1434,7 +1540,23 @@ final class Settings {
 		$detected_plugins = ( class_exists( '\F152\PluginDetector' ) && \F152\PluginDetector::should_show_block() )
 			? \F152\PluginDetector::detected_plugins()
 			: [];
-		$audit_count = count( $tracker_issues ) + count( $policy_issues ) + count( $detected_plugins ) + ( $scan_incomplete ? 1 : 0 );
+		$scanner_checks = class_exists( '\F152\ScannerChecks' )
+			? \F152\ScannerChecks::build( $scan_snapshot, $tracker_issues, $detected_plugins )
+			: [];
+		 
+		$display_groups = class_exists( '\F152\ScannerChecks' ) ? \F152\ScannerChecks::presentation_groups( $scanner_checks ) : [];
+		$scanner_attention_checks = (array) ( $display_groups['attention'] ?? [] );
+		$scanner_reference_checks = (array) ( $display_groups['reference'] ?? [] );
+		$verified_form_count = (int) ( $display_groups['consent_verified'] ?? 0 );
+		$unverified_form_count = (int) ( $display_groups['unverified'] ?? 0 );
+		$scan_forms = isset( $scan_snapshot['forms'] ) && is_array( $scan_snapshot['forms'] ) ? $scan_snapshot['forms'] : [];
+		$scan_form_count = 0;
+		foreach ( $scan_forms as $scan_form ) if ( is_array( $scan_form ) && 'woocommerce_myaccount_page' !== (string) ( $scan_form['evidence'] ?? '' ) && ( ! empty( $scan_form['types'] ) || ! empty( $scan_form['partial_name'] ) ) ) $scan_form_count++;
+		$external_domains = isset( $scan_snapshot['external_domains'] ) && is_array( $scan_snapshot['external_domains'] ) ? $scan_snapshot['external_domains'] : [];
+		$unknown_domain_count = 0;
+		foreach ( $external_domains as $external_domain ) if ( is_array( $external_domain ) && empty( $external_domain['known'] ) ) $unknown_domain_count++;
+		$scanner_issue_count = class_exists( '\F152\ScannerChecks' ) ? \F152\ScannerChecks::issue_count( $scanner_checks ) : count( $tracker_issues );
+		$audit_count = $scanner_issue_count + count( $policy_issues ) + ( $scan_incomplete ? 1 : 0 ) + ( $multilingual_without_pro ? 1 : 0 );
 		?>
 
 		<div class="f152-onboarding">
@@ -1481,18 +1603,34 @@ final class Settings {
 						<h3 id="f152-audit-title">Проверка сайта</h3>
 						<p>Записи блога и товары не сканируются.</p>
 					</div>
-					<?php if ( $audit_count > 0 ) : ?><span class="f152-audit-card__count f152-audit-card__count--attention"><?php echo esc_html( sprintf( 'Нужно проверить: %d', $audit_count ) ); ?></span><?php else : ?><span class="f152-audit-card__count">Проблем не найдено</span><?php endif; ?>
+					<?php if ( $scan_pending ) : ?><span class="f152-audit-card__count">Проверка выполняется</span><?php elseif ( $audit_count > 0 ) : ?><span class="f152-audit-card__count f152-audit-card__count--attention"><?php echo esc_html( sprintf( 'Нужно проверить: %d', $audit_count ) ); ?></span><?php elseif ( ! $scan_complete || $unverified_form_count > 0 ) : ?><span class="f152-audit-card__count">Проверка неполная</span><?php else : ?><span class="f152-audit-card__count">Проблем не найдено</span><?php endif; ?>
 				</div>
 
 				<div class="f152-audit-list">
+					<?php if ( $multilingual_without_pro ) : ?>
+					<div class="f152-audit-item f152-audit-item--warning">
+						<div class="f152-audit-item__icon"><span class="dashicons dashicons-translation" aria-hidden="true"></span></div>
+						<div class="f152-audit-item__body">
+							<div class="f152-audit-item__title"><strong>Обнаружен мультиязычный сайт</strong><span class="f152-status-chip f152-status-chip--attention">Нужна настройка переводов</span></div>
+							<p><?php echo esc_html( sprintf( 'Языковой плагин: %s. Бесплатная версия FZ-152 RF не создаёт связанные юридические документы и не переводит тексты согласий автоматически. Проверьте все языковые версии сайта вручную.', implode( ', ', $multilingual_providers ) ) ); ?></p>
+							<p>В FZ-152 RF Pro доступна генерация и синхронизация русских и английских документов с учётом CRM и трекеров, а также языковые тексты чекбоксов и cookie-баннера.</p>
+							<p><a class="button button-primary" href="<?php echo esc_url( add_query_arg( [ 'utm_source' => 'free_plugin', 'utm_medium' => 'multilingual_audit', 'utm_campaign' => 'pro_upgrade' ], F152_PURCHASE_URL ) ); ?>" target="_blank" rel="noopener noreferrer">Мультиязычность в Pro</a></p>
+						</div>
+					</div>
+					<?php elseif ( $multilingual_detected && count( $multilingual_providers ) > 1 ) : ?>
+					<div class="f152-audit-item f152-audit-item--warning">
+						<div class="f152-audit-item__icon"><span class="dashicons dashicons-warning" aria-hidden="true"></span></div>
+						<div class="f152-audit-item__body"><strong>Найдено несколько языковых систем</strong><p>Одновременно обнаружены <?php echo esc_html( implode( ', ', $multilingual_providers ) ); ?>. Оставьте один языковой плагин: автоматическая синхронизация документов при конфликте отключена.</p></div>
+					</div>
+					<?php endif; ?>
 					<div class="f152-audit-item" data-f152-browser-scan>
 						<div class="f152-audit-item__icon"><span class="dashicons dashicons-search" aria-hidden="true"></span></div>
 						<div class="f152-audit-item__body">
 							<div class="f152-audit-item__title"><strong>Результат проверки сайта</strong><span class="f152-status-chip <?php echo esc_attr( $scan_complete ? 'f152-status-chip--success' : 'f152-status-chip--scanning' ); ?>" data-f152-browser-scan-chip aria-live="polite"><span class="f152-status-chip__spinner" aria-hidden="true"></span><span data-f152-browser-scan-chip-text><?php echo esc_html( $scan_complete ? 'Готово' : 'Сканирование…' ); ?></span></span></div>
-							<?php if ( ! empty( $detected_frontend_labels ) ) : ?>
-								<p><strong>Найдены сервисы:</strong> <?php echo esc_html( implode( ', ', $detected_frontend_labels ) ); ?>.</p>
-							<?php else : ?>
-								<p>На проверенных страницах известные внешние сервисы пока не найдены. Браузер проверит главную и опубликованные страницы.</p>
+							<?php if ( $scan_complete ) : ?>
+								<p>Найдено форм: <?php echo esc_html( (string) $scan_form_count ); ?>, с обнаруженным согласием: <?php echo esc_html( (string) $verified_form_count ); ?><?php if ( $unverified_form_count ) : ?>, не удалось проверить: <?php echo esc_html( (string) $unverified_form_count ); ?><?php endif; ?>. Внешних доменов: <?php echo esc_html( (string) count( $external_domains ) ); ?><?php if ( $unknown_domain_count > 0 ) : ?>, требуют проверки: <?php echo esc_html( (string) $unknown_domain_count ); ?><?php endif; ?>.</p>
+								<?php if ( ! empty( $detected_frontend_labels ) ) : ?><p class="f152-audit-item__meta">Распознаны сервисы: <?php echo esc_html( implode( ', ', $detected_frontend_labels ) ); ?>.</p><?php endif; ?>
+								<?php if ( array_key_exists( 'form_signals_available', $scan_snapshot ) && empty( $scan_snapshot['form_signals_available'] ) ) : ?><p class="f152-audit-item__meta">На сервере недоступно расширение PHP DOM, поэтому детальный анализ полей форм отключён.</p><?php endif; ?>
 							<?php endif; ?>
 							<p class="f152-audit-item__meta" data-f152-browser-scan-status aria-live="polite"><?php echo esc_html( $scan_complete ? sprintf( 'Проверено страниц: %d. Ошибок загрузки: %d.', (int) ( $scan_meta['rendered_pages'] ?? 0 ), $scan_failed_pages ) : 'Сканирование ещё выполняется. Результат обновится автоматически.' ); ?></p>
 							<?php $rescan_url = wp_nonce_url( admin_url( 'admin-post.php?action=f152_rescan_site' ), 'f152_rescan_site' ); ?>
@@ -1547,38 +1685,16 @@ final class Settings {
 						</div>
 					<?php endif; ?>
 
-					<?php foreach ( $detected_plugins as $detected_plugin ) : ?>
-						<div class="f152-audit-item">
-							<div class="f152-audit-item__icon"><span class="dashicons dashicons-forms" aria-hidden="true"></span></div>
-							<div class="f152-audit-item__body">
-								<div class="f152-audit-item__title"><strong><?php echo esc_html( $detected_plugin['name'] ); ?></strong><span class="f152-status-chip f152-status-chip--attention">Нужно настроить</span></div>
-								<p>На сайте есть эта форма, но бесплатный FZ-152 не умеет автоматически добавлять в неё согласие и записывать его в журнал. Если посетители отправляют через форму имя, телефон, email или другие данные — добавьте чекбокс согласия вручную. У Pro версии есть полная интеграция с этим плагином.</p>
-							</div>
-						</div>
-					<?php endforeach; ?>
 
-					<?php foreach ( $tracker_issues as $tracker_issue ) : ?>
-						<div class="f152-audit-item">
-							<div class="f152-audit-item__icon"><span class="dashicons dashicons-search" aria-hidden="true"></span></div>
-							<div class="f152-audit-item__body">
-								<div class="f152-audit-item__title"><strong><?php echo esc_html( $tracker_issue['label'] ); ?></strong><span class="f152-status-chip f152-status-chip--attention">Нужно исправить</span></div>
-								<p><?php echo esc_html( $tracker_issue['message'] ); ?></p>
-								<?php if ( ! empty( $tracker_issue['ids'] ) ) : ?>
-									<p class="f152-audit-item__meta">ID сервиса: <?php echo esc_html( implode( ', ', array_slice( $tracker_issue['ids'], 0, 3 ) ) ); ?></p>
-								<?php endif; ?>
-								<?php if ( ! empty( $tracker_issue['locations'] ) && is_array( $tracker_issue['locations'] ) ) : ?>
-									<?php
-									$location_labels = [];
-									foreach ( array_slice( $tracker_issue['locations'], 0, 3 ) as $location ) {
-										if ( ! is_array( $location ) ) continue;
-										$location_labels[] = ! empty( $location['title'] ) ? (string) $location['title'] : (string) ( $location['url'] ?? '' );
-									}
-									?>
-									<?php if ( ! empty( array_filter( $location_labels ) ) ) : ?><p class="f152-audit-item__meta">Страница: <?php echo esc_html( implode( ', ', array_filter( $location_labels ) ) ); ?></p><?php endif; ?>
-								<?php endif; ?>
+					<?php foreach ( $scanner_attention_checks as $scanner_check ) self::render_scanner_check_item( $scanner_check ); ?>
+					<?php if ( ! empty( $scanner_reference_checks ) ) : ?>
+						<details class="f152-audit-extra">
+							<summary>Успешные и справочные результаты (<?php echo esc_html( (string) count( $scanner_reference_checks ) ); ?>)</summary>
+							<div class="f152-audit-extra__items">
+								<?php foreach ( $scanner_reference_checks as $scanner_check ) self::render_scanner_check_item( $scanner_check ); ?>
 							</div>
-						</div>
-					<?php endforeach; ?>
+						</details>
+					<?php endif; ?>
 
 					<?php $show_pro_policy_action = false; ?>
 					<?php foreach ( $policy_issues as $policy_issue ) : ?>
@@ -1597,7 +1713,7 @@ final class Settings {
 					<?php endforeach; ?>
 				</div>
 
-				<?php if ( $pro_active && $show_pro_policy_action ) : ?>
+				<?php if ( $pro_active && $show_pro_policy_action && ! $multilingual_detected ) : ?>
 				<div class="f152-audit-pro-cta">
 					<div>
 						<strong>Тексты Pro требуют настройки</strong>
@@ -1607,7 +1723,7 @@ final class Settings {
 				</div>
 				<?php endif; ?>
 
-				<?php if ( ! $pro_active && $audit_count > 0 ) : ?>
+				<?php if ( ! $pro_active && $audit_count > 0 && ! $multilingual_without_pro ) : ?>
 				<div class="f152-audit-pro-cta">
 					<div>
 						<strong>FZ-152 RF Pro может исправить это автоматически</strong>
@@ -1645,6 +1761,27 @@ final class Settings {
 						<div class="f152-field"><label for="f152_link_consent_pd">Согласие на обработку ПД (URL)</label><input type="url" class="regular-text" id="f152_link_consent_pd" name="f152_link_consent_pd" value="<?php echo esc_attr( get_option('f152_link_consent_pd', '') ); ?>"></div>
 						<div class="f152-field"><label for="f152_link_policy_cookie">Политика использования cookie (URL)</label><input type="url" class="regular-text" id="f152_link_policy_cookie" name="f152_link_policy_cookie" value="<?php echo esc_attr( get_option('f152_link_policy_cookie', '') ); ?>"></div>
 						<div class="f152-field"><label for="f152_link_consent_marketing">Согласие на рассылку (URL)</label><input type="url" class="regular-text" id="f152_link_consent_marketing" name="f152_link_consent_marketing" value="<?php echo esc_attr( get_option('f152_link_consent_marketing', '') ); ?>"></div>
+						<?php
+						 
+						 
+						$english_urls = apply_filters( 'f152/admin/english_document_urls', [] );
+						if ( is_array( $english_urls ) && ! empty( $english_urls ) ) :
+							$english_labels = [
+								'f152_link_policy_pd' => 'Политика обработки ПД (EN)',
+								'f152_link_consent_pd' => 'Согласие на обработку ПД (EN)',
+								'f152_link_policy_cookie' => 'Политика cookie (EN)',
+								'f152_link_consent_marketing' => 'Согласие на рассылку (EN)',
+						];
+							foreach ( $english_labels as $english_key => $english_label ) :
+								if ( empty( $english_urls[ $english_key ] ) || ! is_string( $english_urls[ $english_key ] ) ) { continue; }
+								$english_url = esc_url( $english_urls[ $english_key ] );
+								if ( '' === $english_url ) { continue; }
+								?><div class="f152-field"><label><?php echo esc_html( $english_label ); ?></label>
+								<input type="url" class="regular-text" value="<?php echo esc_attr( $english_url ); ?>" readonly aria-readonly="true">
+								<small>Заполнено генератором Pro. <a href="<?php echo esc_url( add_query_arg( [ 'page' => 'f152', 'tab' => 'languages' ], admin_url( 'options-general.php' ) ) ); ?>">Изменить на вкладке «Языки»</a>.</small></div><?php
+							endforeach;
+						endif;
+						?>
 						<div class="f152-field"><label for="f152_policy_version">Версия политики персональных данных</label><input type="text" class="regular-text" id="f152_policy_version" name="f152_policy_version" value="<?php echo esc_attr( API::get_policy_version() ); ?>" placeholder="1.0"><small>Версия сохраняется в журнале. После её изменения ранее сохранённый выбор cookie считается устаревшим и баннер показывается снова. При наличии кэша/CDN очистите его.</small></div>
 						<div class="f152-field f152-field--full f152-create-pages-field"><label>Действия со страницами</label><?php self::render_create_pages_button(); ?></div>
 					</div>
@@ -2258,6 +2395,29 @@ final class Settings {
 			echo '<p><em>Класс Templates не найден. Проверьте подключение includes/class-templates.php</em></p>';
 		}
 	}
+	private static function render_locked_languages_tab() : void {
+		$buy_url = apply_filters( 'f152_pro_buy_url', add_query_arg( [
+			'utm_source' => 'free_plugin', 'utm_medium' => 'languages_tab',
+			'utm_campaign' => 'pro_upgrade', 'utm_content' => 'languages_locked',
+		], F152_PURCHASE_URL ) );
+		?>
+		<div class="f152-integrations-locked">
+			<div class="f152-addon-intro">
+				<span class="f152-card-eyebrow">FZ-152 RF Pro</span>
+				<h2>Мультиязычность сайта</h2>
+				<p>Если ваш WordPress-сайт работает на нескольких языках, Pro поможет показывать посетителям согласия, ссылки на документы и cookie-баннер на языке страницы.</p>
+			</div>
+			<div class="f152-integrations-card f152-integrations-card--locked" style="max-width:820px;">
+				<div class="f152-integrations-card__body">
+					<h3 class="f152-integrations-card__title">Переводы согласий и юридические документы</h3>
+					<p class="f152-integrations-card__desc">Поддерживаются Polylang, WPML и qTranslate-X/XT. Для сайта с русским и английским языками Pro автоматически создаёт, публикует и обновляет четыре юридических документа на обоих языках. Переводы текстов согласий и cookie-баннера также поддерживаются. Для остальных языков тексты согласий и ссылки на документы настраиваются вручную; автоматическая генерация юридических документов на этих языках не предусмотрена.</p>
+				</div>
+			</div>
+			<div class="f152-integrations-locked__cta"><a class="button button-primary" href="<?php echo esc_url( $buy_url ); ?>" target="_blank" rel="noopener noreferrer">Подробнее о FZ-152 RF Pro</a></div>
+		</div>
+		<?php
+	}
+
 	private static function render_locked_rkn_tab() : void {
 		$buy_url = apply_filters( 'f152_pro_buy_url', add_query_arg( [ 'utm_source' => 'free_plugin', 'utm_medium' => 'rkn_tab', 'utm_campaign' => 'pro_upgrade', 'utm_content' => 'rkn_locked_cta' ], F152_PURCHASE_URL ) );
 		?>
@@ -2834,6 +2994,7 @@ final class Settings {
  		'decision',
  		'required',
  		'consent_text',
+		'language',
  		'policy_version',
  		'policy_url',
  		'consent_hash',
@@ -2863,6 +3024,7 @@ final class Settings {
  			$event_meta['decision'],
  			$event_meta['required'],
  			$row['consent_text'] ?? '',
+			$row['language'] ?? '',
  			$row['policy_version'] ?? '',
  			$row['policy_url'] ?? '',
  			$row['consent_hash'] ?? '',
@@ -2902,7 +3064,7 @@ final class Settings {
 
   
  public static function write_cookie_csv( $output ): void {
-	fputcsv( $output, [ 'id', 'event_id', 'created_at', 'created_at_utc', 'timezone', 'action', 'source', 'necessary', 'analytics', 'marketing', 'categories_json', 'page_url', 'ip_address', 'browser', 'user_agent', 'policy_version', 'policy_url' ], ';', '"', '' );
+	fputcsv( $output, [ 'id', 'event_id', 'created_at', 'created_at_utc', 'timezone', 'action', 'source', 'necessary', 'analytics', 'marketing', 'categories_json', 'page_url', 'ip_address', 'browser', 'user_agent', 'policy_version', 'policy_url', 'language' ], ';', '"', '' );
 	$max_id = CookieConsentLog::get_export_max_id();
 	$after_id = 0;
 	while ( $after_id < $max_id ) {
@@ -2917,7 +3079,7 @@ final class Settings {
 				$row['created_at_utc'], wp_timezone()->getName(), $row['action'], $row['source'],
 				$row['necessary'], $row['analytics'], $row['marketing'], $row['categories_json'],
 				$row['page_url'], $row['ip_address'], CookieConsentLog::browser_name( $ua ), $ua,
-				$row['policy_version'], $row['policy_url'],
+				$row['policy_version'], $row['policy_url'], $row['language'] ?? '',
 			];
 			fputcsv( $output, array_map( [ __CLASS__, 'csv_safe_cell' ], $csv_row ), ';', '"', '' );
 			$after_id = (int) $row['id'];
@@ -3027,6 +3189,11 @@ final class Settings {
  		}
 
  		check_admin_referer( 'f152_replace_configured_pages', 'f152_replace_pages_nonce' );
+		if ( ! MultilingualSafety::may_automatically_write() ) {
+			self::flash_create_result( [ 'type' => 'error', 'message' => 'Замена юридических страниц заблокирована: на сайте активен мультиязычный плагин. Во избежание потери переводов редактируйте страницы вручную.', 'items' => [] ] );
+			self::redirect_back_to_tab( 'texts' );
+		}
+
 
  		$return_tab_raw = filter_input( INPUT_POST, 'return_tab', FILTER_UNSAFE_RAW );
  		if ( ! is_string( $return_tab_raw ) ) {
@@ -3120,7 +3287,11 @@ final class Settings {
  		$written = [];
  		$failed_message = '';
  		foreach ( $targets as $key => $target ) {
- 			$current = get_post( (int) $target['page_id'] );
+			if ( ! MultilingualSafety::may_automatically_write( (int) $target['page_id'] ) ) {
+				$failed_message = 'Обнаружен переводной юридический документ. Автоматическая перезапись запрещена.';
+				break;
+			}
+			$current = get_post( (int) $target['page_id'] );
  			if ( ! $current instanceof \WP_Post || (string) $current->post_content !== (string) $target['old_content'] ) {
  				$failed_message = sprintf( 'Страница «%s» изменилась во время операции. Ничего не перезаписано поверх более свежего текста.', $target['title'] );
  				break;
@@ -3242,6 +3413,11 @@ final class Settings {
  		}
 
  		check_admin_referer('f152_create_pages', 'f152_create_pages_nonce');
+		if ( ! MultilingualSafety::may_automatically_write() ) {
+			self::flash_create_result( [ 'type' => 'error', 'message' => 'Автогенерация юридических страниц заблокирована на мультиязычном сайте. Подготовьте переводы и страницы вручную.', 'items' => [] ] );
+			self::redirect_back();
+		}
+
 
  		$config = self::legal_pages_config();
 
@@ -3442,34 +3618,46 @@ final class Settings {
  	}
 
  	private static function render_create_pages_button(): void {
- 		$config = self::legal_pages_config();
+		 
+		 
+		if ( class_exists( '\F152\MultilingualSafety' ) && \F152\MultilingualSafety::is_multilingual() ) {
+			$providers = \F152\MultilingualSafety::providers();
+			$pro_ready = self::is_pro_license_active();
+			$pro_mode = $pro_ready && class_exists( '\F152Pro\BilingualPolicyGenerator' )
+				? \F152Pro\BilingualPolicyGenerator::supported() : [];
+			?><div class="notice notice-info inline" style="margin:0;padding:10px 14px;">
+			<p><strong>Здесь отключена только кнопка бесплатного генератора.</strong></p>
+			<p>Обнаружен языковой плагин: <?php echo esc_html( implode( ', ', $providers ) ); ?>. Чтобы сохранить переводы, обычный генератор Free не записывает юридические страницы.</p>
+			<?php if ( ! empty( $pro_mode ) && ! empty( $pro_mode['generate_en'] ) ) : ?>
+			<p><strong>Pro готов:</strong> на вкладке «Языки» можно создать и обновить опубликованные документы RU и EN. Для Polylang/WPML будут отдельные связанные страницы, для qTranslate — обе языковые секции одной записи.</p>
+			<?php elseif ( ! empty( $pro_mode ) ) : ?>
+			<p><strong>Pro готов:</strong> генератор на вкладке «Языки» обновляет только русский вариант. Другие языки остаются без изменений.</p>
+			<?php elseif ( $pro_ready ) : ?>
+			<p>Откройте вкладку «Языки» для диагностики. Автоматическая RU/EN-генерация требует ровно один поддерживаемый языковой плагин и настроенные RU + EN; для qTranslate с тремя языками генерация заблокирована.</p>
+			<?php else : ?>
+			<p>В Pro доступна отдельная генерация RU + EN для qTranslate, Polylang и WPML. При дополнительных языках Polylang/WPML могут обновляться только русские документы.</p>
+			<?php endif; ?>
+			<p><a class="button button-secondary" href="<?php echo esc_url( self::tab_url( 'texts' ) ); ?>">Русские шаблоны</a> <a class="button" href="<?php echo esc_url( self::tab_url( 'languages' ) ); ?>"><?php echo $pro_ready ? 'Открыть генератор Pro' : 'Мультиязычность в Pro'; ?></a></p>
+			</div><?php
+			return;
+		}
 
- 		$empty_count = 0;
- 		foreach ( $config as $cfg ) {
- 			if ( trim((string) get_option($cfg['url_opt'], '')) === '' ) {
- 				$empty_count++;
- 			}
- 		}
-
- 		$total = count($config);
-
- 		$label = ( $empty_count === $total )
- 			? 'Создать страницы'
- 			: 'Создать недостающие страницы';
-
- 		?>
-		<div class="f152-create-pages-actions">
-			<div class="f152-create-pages-action">
-				<button type="submit" name="f152_save_and_create_pages" value="1" class="button button-primary"><?php echo esc_html($label); ?></button>
-				<span class="description">Создаёт только недостающие юридические страницы и заполняет ссылки в настройках.</span>
-				<?php if ( $empty_count === 0 ) : ?>
-					<span class="description">Все ссылки уже заполнены — новые страницы созданы не будут.</span>
-				<?php endif; ?>
-			</div>
-			<?php self::render_replace_configured_pages_button( true, 'main' ); ?>
+		$config = self::legal_pages_config();
+		$empty_count = 0;
+		foreach ( $config as $cfg ) {
+			if ( trim((string) get_option($cfg['url_opt'], '')) === '' ) { $empty_count++; }
+		}
+		$total = count($config);
+		$label = ( $empty_count === $total ) ? 'Создать страницы' : 'Создать недостающие страницы';
+		?>
+		<div class="f152-create-pages-actions"><div class="f152-create-pages-action">
+			<button type="submit" name="f152_save_and_create_pages" value="1" class="button button-primary"><?php echo esc_html($label); ?></button>
+			<span class="description">Создаёт только недостающие юридические страницы и заполняет ссылки в настройках.</span>
+			<?php if ( $empty_count === 0 ) : ?><span class="description">Все ссылки уже заполнены — новые страницы созданы не будут.</span><?php endif; ?>
 		</div>
- 		<?php
- 	}
+		<?php self::render_replace_configured_pages_button( true, 'main' ); ?>
+		</div><?php
+	}
 
  	private static function configured_pages_are_managed(): bool {
  		$generated = get_option( 'f152_generated_page_ids', [] );
@@ -3553,6 +3741,9 @@ final class Settings {
 	}
 
 	private static function render_replace_configured_pages_button( bool $save_first = true, string $return_tab = 'main' ): void {
+		 
+		 
+		if ( class_exists( '\F152\MultilingualSafety' ) && \F152\MultilingualSafety::is_multilingual() ) { return; }
 		$managed = self::configured_pages_are_managed();
 		if ( $managed && ! self::configured_pages_need_full_template_refresh() ) {
 			return;
@@ -3868,7 +4059,7 @@ final class Settings {
                                 <td class="f152-cookie-log-table__page"><?php if ( '' !== $url ) : ?><a href="<?php echo esc_url( $url ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html( $url ); ?></a><?php else : ?>&mdash;<?php endif; ?></td>
                                 <td><?php echo esc_html( $row['ip_address'] ?? '—' ); ?></td>
                                 <td class="f152-cookie-log-table__ua"><?php if ( '' !== $ua ) : ?><?php echo esc_html( CookieConsentLog::browser_name( $ua ) ); ?><details><summary>User-Agent</summary><small><?php echo esc_html( $ua ); ?></small></details><?php else : ?>&mdash;<?php endif; ?></td>
-                                <td><?php echo esc_html( $row['policy_version'] ?? '—' ); ?><?php if ( ! empty( $row['policy_url'] ) ) : ?><br><a href="<?php echo esc_url( $row['policy_url'] ); ?>" target="_blank" rel="noopener noreferrer">Политика cookie</a><?php endif; ?></td>
+                                <td><?php echo esc_html( $row['policy_version'] ?? '—' ); ?><?php if ( ! empty( $row['language'] ) ) : ?><br><small>Язык: <?php echo esc_html( $row['language'] ); ?></small><?php endif; ?><?php if ( ! empty( $row['policy_url'] ) ) : ?><br><a href="<?php echo esc_url( $row['policy_url'] ); ?>" target="_blank" rel="noopener noreferrer">Политика cookie</a><?php endif; ?></td>
                             </tr>
                         <?php endforeach; ?>
                         </tbody>

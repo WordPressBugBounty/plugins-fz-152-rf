@@ -22,11 +22,12 @@ final class ServiceCatalog {
 				],
 			],
 			'yandex_maps' => [
-				'label'       => 'Яндекс.Карты',
+				'label'       => 'Яндекс.Карты и отзывы',
 				'patterns'    => [
 					'~(?:https?:)?//api-maps\.yandex\.(?:ru|com)/services/constructor/1\.0/js/~i',
 					'~(?:https?:)?//api-maps\.yandex\.(?:ru|com)/frame/v1/~i',
 					'~(?:https?:)?//(?:www\.)?yandex\.(?:ru|com)/map-widget/~i',
+					'~(?:https?:)?//(?:www\.)?yandex\.(?:ru|com)/maps-reviews-widget/[0-9]+(?:[/?#]|$)~i',
 				],
 				'candidate_patterns' => [
 					'~(?:https?:)?//(?:www\.)?yandex\.(?:ru|com)/maps(?:[/?#]|$)~i',

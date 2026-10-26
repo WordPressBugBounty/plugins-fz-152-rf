@@ -109,6 +109,7 @@ final class PolicyServices {
 		if ( 'pro' === sanitize_key( (string) ( $definition['policy_owner'] ?? '' ) ) && function_exists( 'apply_filters' ) ) {
 			$block = apply_filters( 'f152/render_policy_service', $block, $document, $service_id, $definition );
 		}
+		$block = apply_filters( 'f152/render_policy_service_translation', $block, $document, $service_id, $definition );
 		if ( ! is_string( $block ) ) {
 			return '';
 		}
@@ -466,6 +467,12 @@ final class PolicyServices {
 
 	public static function render_free_sync_panel( string $document ): void {
 		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		 
+		 
+		 
+		if ( class_exists( '\F152\MultilingualSafety' ) && \F152\MultilingualSafety::is_multilingual() ) {
 			return;
 		}
 		$document = sanitize_key( $document );
@@ -976,6 +983,10 @@ final class PolicyServices {
 				continue;
 			}
 
+			if ( ! MultilingualSafety::may_automatically_write( $page_id ) ) {
+				self::rollback_free_sync_targets( $updated );
+				return false;
+			}
 			$current = get_post( $page_id );
 			if ( ! $current instanceof \WP_Post || (string) $current->post_content !== $old_content ) {
 				self::rollback_free_sync_targets( $updated );
@@ -1042,49 +1053,150 @@ final class PolicyServices {
 		return ! in_array( $status, [ 'missing', 'unreadable' ], true );
 	}
 
+	 
 	public static function reflection_status( string $service_id ): string {
 		$service_id = sanitize_key( $service_id );
 		$definition = ServiceCatalog::get( $service_id );
 		$documents = isset( $definition['policy_documents'] ) && is_array( $definition['policy_documents'] )
 			? array_values( array_filter( array_map( 'sanitize_key', $definition['policy_documents'] ) ) )
 			: [];
-		if ( empty( $documents ) ) {
-			return 'not_applicable';
-		}
+		if ( ! $documents ) return 'not_applicable';
 
 		$statuses = [];
 		foreach ( $documents as $document ) {
-			$page_id = self::policy_page_id_for_read( $document );
-			if ( $page_id <= 0 ) {
-				return 'unreadable';
+			$targets = self::reflection_targets( $document );
+			if ( ! $targets ) return 'unreadable';
+			foreach ( $targets as $target ) {
+				$content = $target['content'];
+				if ( self::service_marker_version( $content, $service_id ) >= self::expected_service_version( $service_id ) ) {
+					$statuses[] = 'managed';
+					continue;
+				}
+				 
+				$legacy = self::known_legacy_match( $document, $content );
+				$legacy_services = isset( $legacy['services'] ) && is_array( $legacy['services'] ) ? $legacy['services'] : [];
+				if ( in_array( $service_id, array_map( 'sanitize_key', $legacy_services ), true ) ) {
+					$statuses[] = 'legacy';
+					continue;
+				}
+				if ( self::content_mentions_service( $content, $definition ) ) {
+					$statuses[] = 'manual';
+					continue;
+				}
+				return 'missing';
 			}
-			$post = get_post( $page_id );
-			if ( ! $post instanceof \WP_Post || 'page' !== $post->post_type || 'trash' === $post->post_status ) {
-				return 'unreadable';
-			}
-
-			$content = (string) $post->post_content;
-			if ( self::service_marker_version( $content, $service_id ) >= self::expected_service_version( $service_id ) ) {
-				$statuses[] = 'managed';
-				continue;
-			}
-
-			$legacy = self::known_legacy_match( $document, $content );
-			$legacy_services = isset( $legacy['services'] ) && is_array( $legacy['services'] ) ? $legacy['services'] : [];
-			if ( in_array( $service_id, array_map( 'sanitize_key', $legacy_services ), true ) ) {
-				$statuses[] = 'legacy';
-				continue;
-			}
-
-			if ( self::content_mentions_service( $content, $definition ) ) {
-				$statuses[] = 'manual';
-				continue;
-			}
-			return 'missing';
 		}
-
 		$statuses = array_values( array_unique( $statuses ) );
 		return 1 === count( $statuses ) ? $statuses[0] : 'mixed';
+	}
+
+	 
+	private static function reflection_targets( string $document ): array {
+		$provider = class_exists( '\F152\MultilingualSafety' ) ? MultilingualSafety::provider() : '';
+		 
+		 
+		$generated = get_option( 'f152_pro_generated_legal_pages_v1', [] );
+		$pair = is_array( $generated ) && isset( $generated[ $document ] ) && is_array( $generated[ $document ] )
+			? $generated[ $document ] : [];
+		$ru_id = (int) ( $pair['ru'] ?? 0 );
+		if ( ! self::owned_reflection_page( $ru_id, $document ) ) {
+			$ru_id = self::policy_page_id_for_read( $document );
+		}
+		if ( $ru_id <= 0 && $provider ) {
+			 
+			 
+			$free_ids = get_option( 'f152_generated_page_ids', [] );
+			$candidate = is_array( $free_ids ) ? (int) ( $free_ids[ $document ] ?? 0 ) : 0;
+			$post = $candidate > 0 ? get_post( $candidate ) : null;
+			if ( $post instanceof \WP_Post && 'page' === $post->post_type && 'publish' === $post->post_status ) {
+				$ru_id = $candidate;
+			}
+		}
+		if ( $ru_id <= 0 ) return [];
+		$ru_content = self::raw_policy_content( $ru_id );
+		if ( null === $ru_content ) return [];
+
+		if ( 'qtranslate' === $provider ) {
+			$segments = self::qtranslate_policy_sections( $ru_content );
+			if ( $segments ) {
+				$targets = [];
+				foreach ( $segments as $language => $section ) {
+					 
+					$targets[] = [ 'language' => $language, 'content' => $section ];
+				}
+				return $targets;
+			}
+			 
+			if ( preg_match( '/\[:[a-z]{2,3}(?:[-_][a-z0-9]+)?\]|<!--\s*:[a-z]{2,3}/i', $ru_content ) ) return [];
+		}
+
+		$targets = [ [ 'language' => 'ru', 'content' => $ru_content ] ];
+		if ( 'polylang' !== $provider && 'wpml' !== $provider ) return $targets;
+
+		$languages = [ 'en' ];
+		if ( 'polylang' === $provider && function_exists( 'pll_languages_list' ) ) {
+			$languages = (array) pll_languages_list( [ 'hide_empty' => 0, 'fields' => 'slug' ] );
+		} elseif ( 'wpml' === $provider ) {
+			// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Official WPML API hook.
+			$available = apply_filters( 'wpml_active_languages', null, [ 'skip_missing' => 0 ] );
+			if ( is_array( $available ) && $available ) $languages = array_keys( $available );
+		}
+		foreach ( array_values( array_unique( array_map( 'strval', $languages ) ) ) as $language ) {
+			if ( 'ru' === $language || ! preg_match( '/^[a-z]{2,3}(?:[-_][a-z0-9]+)*$/iD', $language ) ) continue;
+			$translated_id = 0;
+			if ( 'polylang' === $provider && function_exists( 'pll_get_post' ) ) {
+				$translated_id = (int) pll_get_post( $ru_id, $language );
+			} elseif ( 'wpml' === $provider ) {
+				// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Official WPML API hook.
+				$translated_id = (int) apply_filters( 'wpml_object_id', $ru_id, 'page', false, $language );
+			}
+			if ( $translated_id <= 0 || $translated_id === $ru_id ) continue;
+			$post = get_post( $translated_id );
+			$belongs_to = (string) get_post_meta( $translated_id, '_f152_pro_legal_generated_doc', true );
+			if ( ! $post instanceof \WP_Post || 'page' !== $post->post_type || 'publish' !== $post->post_status || ( '' !== $belongs_to && $belongs_to !== $document ) ) return [];
+			$translated_content = self::raw_policy_content( $translated_id );
+			if ( null === $translated_content ) return [];
+			$targets[] = [ 'language' => $language, 'content' => $translated_content ];
+		}
+		 
+		if ( isset( $pair['en'] ) && (int) $pair['en'] > 0 ) {
+			$located = false;
+			foreach ( $targets as $target ) {
+				if ( 'en' === $target['language'] ) { $located = true; break; }
+			}
+			if ( ! $located ) return [];
+		}
+
+		return $targets;
+	}
+
+	private static function owned_reflection_page( int $page_id, string $document ): bool {
+		if ( $page_id <= 0 ) return false;
+		$post = get_post( $page_id );
+		return $post instanceof \WP_Post && 'page' === $post->post_type && 'publish' === $post->post_status
+			&& (string) get_post_meta( $page_id, '_f152_pro_legal_generated_doc', true ) === $document;
+	}
+
+	 
+	private static function raw_policy_content( int $page_id ): ?string {
+		$post = get_post( $page_id, OBJECT, 'raw' );
+		return $post instanceof \WP_Post ? (string) $post->post_content : null;
+	}
+
+	 
+	private static function qtranslate_policy_sections( string $raw ): array {
+		$raw = trim( $raw );
+		if ( preg_match_all( '/\[:([a-z]{2,3}(?:[-_][a-z0-9]+)?)\](.*?)(?=\[:[a-z]{2,3}(?:[-_][a-z0-9]+)?\]|\[:\]|\z)/is', $raw, $matches, PREG_SET_ORDER ) ) {
+			$sections = [];
+			foreach ( $matches as $match ) $sections[ strtolower( $match[1] ) ] = trim( $match[2] );
+			return $sections;
+		}
+		if ( preg_match_all( '/<!--\s*:([a-z]{2,3}(?:[-_][a-z0-9]+)?)\s*-->(.*?)<!--\s*:\s*-->/is', $raw, $matches, PREG_SET_ORDER ) ) {
+			$sections = [];
+			foreach ( $matches as $match ) $sections[ strtolower( $match[1] ) ] = trim( $match[2] );
+			return $sections;
+		}
+		return [];
 	}
 
 	private static function policy_page_id_for_read( string $document ): int {

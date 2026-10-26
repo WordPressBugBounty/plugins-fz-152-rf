@@ -2638,3 +2638,40 @@ body.f152-modal-open {
 	top: auto;
 	bottom: 6px;
 }
+
+ 
+.f152-status-chip--info {
+	background: #eef2f6;
+	color: #50575e;
+}
+
+.f152-audit-item--success {
+	border-color: #cfe8d5;
+	background: #fbfefb;
+}
+
+.f152-audit-item--warning {
+	border-color: #ead9a5;
+}
+
+.f152-audit-item__body .f152-audit-item__recommendation {
+	margin-top: 6px;
+}
+
+ 
+.f152-audit-extra {
+	border: 1px solid #e1e4e7;
+	border-radius: 10px;
+	background: #fbfcfd;
+	padding: 11px 14px;
+}
+.f152-audit-extra > summary {
+	cursor: pointer;
+	font-weight: 600;
+	color: #50575e;
+}
+.f152-audit-extra__items {
+	display: grid;
+	gap: 10px;
+	margin-top: 12px;
+}

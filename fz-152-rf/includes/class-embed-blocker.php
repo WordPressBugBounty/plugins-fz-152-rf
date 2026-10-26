@@ -8,7 +8,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 final class EmbedBlocker {
 
 	private const OPTION_YANDEX_MAPS_BEHAVIOR = 'f152_yandex_maps_behavior';
-	private const ENGINE_VERSION              = '7';
+	private const ENGINE_VERSION              = '8';
 	private const OPTION_ENGINE_VERSION       = 'f152_embed_blocker_version';
 
 	private static $embed_counter = 0;
@@ -67,6 +67,7 @@ final class EmbedBlocker {
 				'url_patterns' => [
 					'~^(?:https?:)?//api-maps\.yandex\.(?:ru|com)/frame/v1/~i',
 					'~^(?:https?:)?//(?:www\.)?yandex\.(?:ru|com)/map-widget/~i',
+					'~^(?:https?:)?//(?:www\.)?yandex\.(?:ru|com)/maps-reviews-widget/[0-9]+(?:[/?#]|$)~i',
 				],
 			],
 		];
@@ -96,7 +97,7 @@ final class EmbedBlocker {
 			}
 
 			$type = sanitize_key( (string) ( $provider['type'] ?? 'content' ) );
-			$type = in_array( $type, [ 'map', 'video', 'content' ], true ) ? $type : 'content';
+			$type = in_array( $type, [ 'map', 'video', 'content', 'reviews' ], true ) ? $type : 'content';
 
 			$category = sanitize_key( (string) ( $provider['category'] ?? 'analytics' ) );
 			$category = in_array( $category, [ 'analytics', 'marketing' ], true ) ? $category : 'analytics';
@@ -277,7 +278,7 @@ final class EmbedBlocker {
 		}
 
 		$result = preg_replace_callback(
-			'~<iframe\b[^>]*>~i',
+			'~<iframe\b(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>~i',
 			static function ( array $matches ) use ( $providers ) : string {
 				return EmbedBlocker::protect_iframe_tag( (string) $matches[0], $providers );
 			},
@@ -320,6 +321,11 @@ final class EmbedBlocker {
 		$mode     = sanitize_key( (string) ( $provider['mode'] ?? 'require_accept' ) );
 		$category = sanitize_key( (string) ( $provider['category'] ?? 'analytics' ) );
 		$type     = sanitize_key( (string) ( $provider['type'] ?? 'content' ) );
+		$label    = sanitize_text_field( (string) ( $provider['label'] ?? '' ) );
+		if ( 'yandex_maps' === $provider_id && self::is_yandex_reviews_url( $source ) ) {
+			$type  = 'reviews';
+			$label = 'Яндекс.Отзывы';
+		}
 		$token    = self::next_token( $source );
 		$style    = self::iframe_placeholder_style( $tag );
 
@@ -337,7 +343,7 @@ final class EmbedBlocker {
 				'data-f152-embed'          => $provider_id,
 				'data-f152-embed-category' => $category,
 				'data-f152-embed-mode'     => $mode,
-				'data-f152-embed-label'    => sanitize_text_field( (string) ( $provider['label'] ?? '' ) ),
+				'data-f152-embed-label'    => $label,
 				'data-f152-embed-type'     => $type,
 				'data-f152-embed-src'      => base64_encode( $source ), // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode -- Transport only; decoded in the browser.
 				'data-f152-embed-token'    => $token,
@@ -349,26 +355,36 @@ final class EmbedBlocker {
 		return self::build_placeholder( $provider_id, $token, $type, $category, $mode, $style ) . $tag;
 	}
 
+	private static function is_yandex_reviews_url( string $source ) : bool {
+		return 1 === preg_match(
+			'~^(?:https?:)?//(?:www\.)?yandex\.(?:ru|com)/maps-reviews-widget/[0-9]+(?:[/?#]|$)~i',
+			$source
+		);
+	}
+
 	private static function build_placeholder( string $provider_id, string $token, string $type, string $category, string $mode, string $style = '' ) : string {
-		$is_map       = 'map' === $type;
-		$is_video     = 'video' === $type;
 		$is_marketing = 'marketing' === $category;
-		if ( $is_map ) {
-			$text   = $is_marketing
-				? __( 'Карта скрыта до разрешения маркетинговых cookie.', 'fz-152-rf' )
-				: __( 'Карта скрыта до разрешения аналитических cookie.', 'fz-152-rf' );
-			$button = __( 'Разрешить и показать карту', 'fz-152-rf' );
-		} elseif ( $is_video ) {
-			$text   = $is_marketing
-				? __( 'Видео скрыто до разрешения маркетинговых cookie.', 'fz-152-rf' )
-				: __( 'Видео скрыто до разрешения аналитических cookie.', 'fz-152-rf' );
-			$button = __( 'Разрешить и показать видео', 'fz-152-rf' );
-		} else {
-			$text   = $is_marketing
-				? __( 'Внешнее содержимое скрыто до разрешения маркетинговых cookie.', 'fz-152-rf' )
-				: __( 'Внешнее содержимое скрыто до разрешения аналитических cookie.', 'fz-152-rf' );
-			$button = __( 'Разрешить и показать', 'fz-152-rf' );
-		}
+		$label_type = in_array( $type, [ 'map', 'video', 'reviews' ], true ) ? $type : 'content';
+		$text_key   = 'embed_' . $label_type . '_blocked' . ( $is_marketing ? '_marketing' : '' );
+		$button_key = 'content' === $label_type ? 'embed_allow' : 'embed_allow_' . $label_type;
+		$fallbacks  = [
+			'embed_map_blocked'               => __( 'Карта скрыта до разрешения аналитических cookie.', 'fz-152-rf' ),
+			'embed_map_blocked_marketing'     => __( 'Карта скрыта до разрешения маркетинговых cookie.', 'fz-152-rf' ),
+			'embed_reviews_blocked'           => __( 'Отзывы Яндекса скрыты до разрешения аналитических cookie.', 'fz-152-rf' ),
+			'embed_reviews_blocked_marketing' => __( 'Отзывы Яндекса скрыты до разрешения маркетинговых cookie.', 'fz-152-rf' ),
+			'embed_video_blocked'             => __( 'Видео скрыто до разрешения аналитических cookie.', 'fz-152-rf' ),
+			'embed_video_blocked_marketing'   => __( 'Видео скрыто до разрешения маркетинговых cookie.', 'fz-152-rf' ),
+			'embed_content_blocked'           => __( 'Внешнее содержимое скрыто до разрешения аналитических cookie.', 'fz-152-rf' ),
+			'embed_content_blocked_marketing' => __( 'Внешнее содержимое скрыто до разрешения маркетинговых cookie.', 'fz-152-rf' ),
+			'embed_allow_map'                 => __( 'Разрешить и показать карту', 'fz-152-rf' ),
+			'embed_allow_reviews'             => __( 'Разрешить и показать отзывы', 'fz-152-rf' ),
+			'embed_allow_video'               => __( 'Разрешить и показать видео', 'fz-152-rf' ),
+			'embed_allow'                     => __( 'Разрешить и показать', 'fz-152-rf' ),
+		];
+		 
+		 
+		$text   = Helpers::ui_label( $text_key, $fallbacks[ $text_key ] );
+		$button = Helpers::ui_label( $button_key, $fallbacks[ $button_key ] );
 
 		$hidden = 'require_accept' === $mode ? '' : ' hidden';
 		$aria   = 'require_accept' === $mode ? 'false' : 'true';

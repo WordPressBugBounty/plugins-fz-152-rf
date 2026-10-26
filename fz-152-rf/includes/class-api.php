@@ -41,7 +41,7 @@ final class API {
 	}
 
 	public static function get_policy_url() : string {
-		$value = (string) get_option( 'f152_link_policy_pd', '' );
+		$value = Helpers::document_url( 'f152_link_policy_pd' );
 		$value = trim( $value );
 
 		if ( $value === '' ) {
@@ -55,10 +55,10 @@ final class API {
 		$raw = '';
 
 		if ( isset( self::$context_option_map[ $context ] ) ) {
-			$opt = (string) get_option( self::$context_option_map[ $context ], '' );
+			$opt = Helpers::text_option( self::$context_option_map[ $context ], '' );
 			$raw = '' !== trim( $opt ) ? $opt : Helpers::default_personal_consent_text();
 		} else {
-			$opt = (string) get_option( 'f152_external_form_text', '' );
+			$opt = Helpers::text_option( 'f152_external_form_text', '' );
 			$raw = '' !== trim( $opt ) ? $opt : Helpers::default_personal_consent_text();
 		}
 
@@ -118,6 +118,8 @@ final class API {
 			'f152_consent_hash'            => $consent_hash,
 			'f152_external_consent_nonce'  => $nonce,
 		];
+		$fields = array_merge( $fields, (array) apply_filters( 'f152/multilingual/form_language_fields', [] ) );
+		 
 
 		$html = '';
 		foreach ( $fields as $name => $value ) {
@@ -209,6 +211,11 @@ final class API {
 		$consent_raw = isset( $request[ $field ] ) ? $request[ $field ] : '';
 		$consent_val = is_string( $consent_raw ) ? sanitize_text_field( wp_unslash( $consent_raw ) ) : '';
 
+		if ( ! apply_filters( 'f152/multilingual/verify_request_language', true, $request ) ) {
+			$result['error'] = __( 'Язык согласия не прошёл проверку. Обновите страницу.', 'fz-152-rf' );
+			return $result;
+		}
+
 		$result['consent_given'] = ( $consent_val === '1' );
 
 		if ( ! $result['consent_given'] ) {
@@ -247,6 +254,9 @@ final class API {
 			$data['consent_text'] = self::get_consent_text( 'external' );
 		}
 
+		if ( ! isset( $data['language'] ) ) {
+			$data['language'] = (string) apply_filters( 'f152/multilingual/current_language', '' );
+		}
 		$filtered = apply_filters( 'f152/consent_log_data', $data );
 		if ( ! is_array( $filtered ) ) {
 			$data['_f152_error'] = 'The f152/consent_log_data filter returned a non-array value.';
@@ -403,6 +413,7 @@ final class API {
 			'policy_version'=> $current_policy_version,
 			'policy_url'    => self::get_policy_url(),
 			'consent_hash'  => $expected_hash,
+			'language'      => (string) apply_filters( 'f152/multilingual/current_language', '' ),
 			'context'       => $context,
 		];
 

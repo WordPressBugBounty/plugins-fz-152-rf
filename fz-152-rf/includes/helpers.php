@@ -144,6 +144,25 @@ final class Helpers {
 	}
 
 
+	 
+	public static function document_url( string $option ): string {
+		$value = (string) get_option( $option, '' );
+		$resolved = apply_filters( 'f152/multilingual/document_url', $value, $option );
+		return is_string( $resolved ) ? esc_url_raw( $resolved ) : esc_url_raw( $value );
+	}
+
+	 
+	public static function text_option( string $option, string $fallback = '' ): string {
+		$value = (string) get_option( $option, $fallback );
+		$resolved = apply_filters( 'f152/multilingual/text', $value, $option );
+		return is_string( $resolved ) ? $resolved : $value;
+	}
+
+	public static function ui_label( string $key, string $fallback ): string {
+		$resolved = apply_filters( 'f152/multilingual/ui', $fallback, $key );
+		return is_string( $resolved ) ? $resolved : $fallback;
+	}
+
 	public static function option(string $key, $default = '') {
 		return get_option($key, $default);
 	}
@@ -188,6 +207,12 @@ final class Helpers {
 
 
 	private static function marketing_policy_context_active() : bool {
+		 
+		 
+		if ( apply_filters( 'f152_force_marketing_policy_context', false ) ) {
+			return true;
+		}
+
 		if ( '' !== trim( (string) self::option( 'f152_link_consent_marketing', '' ) ) ) {
 			return true;
 		}
@@ -279,10 +304,10 @@ HTML;
 			'[f152_company_inn]'          => esc_html( (string) self::option('f152_company_inn', '') ),
 			'[f152_company_email]'        => esc_html( (string) self::option('f152_company_email', '') ),
 			'[f152_policy_version]'       => esc_html( (string) self::option('f152_policy_version', '1.0') ),
-			'[f152_link_policy_pd]'       => self::esc_url_allow_empty( (string) self::option('f152_link_policy_pd', '') ),
-			'[f152_link_consent_pd]'      => self::esc_url_allow_empty( (string) self::option('f152_link_consent_pd', '') ),
-			'[f152_link_policy_cookie]'   => self::esc_url_allow_empty( (string) self::option('f152_link_policy_cookie', '') ),
-			'[f152_link_consent_marketing]' => self::esc_url_allow_empty( (string) self::option('f152_link_consent_marketing', '') ),
+			'[f152_link_policy_pd]'       => self::esc_url_allow_empty( self::document_url( 'f152_link_policy_pd' ) ),
+			'[f152_link_consent_pd]'      => self::esc_url_allow_empty( self::document_url( 'f152_link_consent_pd' ) ),
+			'[f152_link_policy_cookie]'   => self::esc_url_allow_empty( self::document_url( 'f152_link_policy_cookie' ) ),
+			'[f152_link_consent_marketing]' => self::esc_url_allow_empty( self::document_url( 'f152_link_consent_marketing' ) ),
 		];
 
 		if ( false !== strpos( $text, '[f152_services_policy_pd]' ) ) {
@@ -311,17 +336,17 @@ HTML;
 	public static function button_html(string $type) : string {
 		switch ($type) {
 			case 'accept':
-				$label = esc_html__( 'Принять', 'fz-152-rf' );
+				$label = esc_html( self::ui_label( 'accept', __( 'Принять', 'fz-152-rf' ) ) );
 				$class = 'f152-btn f152-btn--accept';
 				$data  = 'data-f152-accept';
 				break;
 			case 'settings':
-				$label = esc_html__( 'Настроить', 'fz-152-rf' );
+				$label = esc_html( self::ui_label( 'settings', __( 'Настроить', 'fz-152-rf' ) ) );
 				$class = 'f152-btn f152-btn--settings';
 				$data  = 'data-f152-open';
 				break;
 			case 'reject':
-				$label = esc_html__( 'Отклонить', 'fz-152-rf' );
+				$label = esc_html( self::ui_label( 'reject', __( 'Отклонить', 'fz-152-rf' ) ) );
 				$class = 'f152-btn f152-btn--reject';
 				$data  = 'data-f152-reject';
 				break;
@@ -349,7 +374,7 @@ HTML;
 	}
 
 	private static function settings_link_html() : string {
-		$label = esc_html__( 'Настроить', 'fz-152-rf' );
+		$label = esc_html( self::ui_label( 'settings', __( 'Настроить', 'fz-152-rf' ) ) );
 
 		return sprintf(
 			'<a href="#" class="%s" data-f152-open>%s</a>',

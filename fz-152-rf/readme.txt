@@ -4,7 +4,7 @@ Tags: 152-фз, персональные данные, cookie, согласие,
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.1
-Stable tag: 0.2.8
+Stable tag: 0.2.9
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -14,7 +14,9 @@ Cookie banner. Consent checkboxes in forms and WooCommerce. Consent logging. Web
 
 FZ-152 RF helps WordPress website owners handle the technical side of personal data consent and cookie management.
 
-The plugin adds a cookie consent banner, consent checkboxes for standard WordPress and WooCommerce forms, a consent log, policy and consent page templates, website diagnostics, consent-based control of Yandex Metrica and Yandex Maps, and a documented API for custom integrations.
+The plugin adds a cookie consent banner, consent checkboxes for standard WordPress and WooCommerce forms, a consent log, policy and consent page templates, website diagnostics, consent-based control of Yandex Metrica, Yandex Maps and the official Yandex Maps reviews iframe widget, and a documented API for custom integrations.
+
+FZ-152 RF also supports multilingual WordPress websites using qTranslate-X, qTranslate-XT, Polylang and WPML. The free plugin detects these language plugins and protects translated policy pages from accidental overwriting. FZ-152 RF Pro adds automatic Russian and English legal document generation, language-specific consent texts and policy links, translated cookie banners, and translated placeholders for embedded maps, videos and custom iframes.
 
 You do not need to understand how WordPress works internally. Fill in the website owner's details, enable the features you need, create the required pages, and open the Diagnostics tab. The plugin will check supported parts of the website and show what may require attention.
 
@@ -35,7 +37,7 @@ You do not need to understand how WordPress works internally. Fill in the websit
 * Creates the main policy and consent pages with one click.
 * Allows existing policy pages to be used instead of creating new ones.
 * Controls Yandex Metrica according to the visitor's cookie choice.
-* Controls supported Yandex Maps embeds according to the visitor's cookie choice.
+* Controls supported Yandex Maps and official Yandex reviews iframe embeds according to the visitor's cookie choice.
 * Scans the website for supported forms, trackers, maps and other external services.
 * Checks whether supported detected services are reflected in policy texts managed by the plugin.
 * Detects signs of possible personal data transfer to some CRM and accounting systems.
@@ -277,6 +279,17 @@ Pro can also add policy information for confirmed use of supported CRM and accou
 * RetailCRM / Simla.com;
 * MoySklad.
 
+= Multilingual WordPress support: qTranslate-X, qTranslate-XT, Polylang and WPML =
+
+FZ-152 RF Pro supports multilingual websites built with qTranslate-X, qTranslate-XT, Polylang and WPML.
+
+On websites configured with Russian (RU) and English (EN) as the two languages, Pro can automatically create, publish and update all four legal and consent documents in both languages: the Personal Data Processing Policy, Consent to Personal Data Processing, Cookie Policy and Consent to Receive Informational and Advertising Messages.
+
+With qTranslate-X/XT, both translations are stored in the same WordPress page. With Polylang or WPML, the plugin creates and links separate language-specific pages.
+
+Pro also provides language-specific consent checkbox texts, policy and consent page URLs, cookie banner content, and placeholders and buttons for supported embedded maps, videos and custom iframes.
+
+For other languages, website owners can configure consent texts and document links manually. Automatic generation of legal documents is limited to Russian and English; safeguards prevent accidental overwriting of other language versions.
 
 = Do I need Pro? =
 
@@ -418,6 +431,13 @@ Cookie-баннер относится к cookie и связанным с ним
 
 Обновление плагина само по себе не требует каждый раз удалять и создавать политики заново.
 
+= Поддерживает ли FZ-152 RF мультиязычные сайты на qTranslate-X/XT, Polylang и WPML? =
+
+Да. Бесплатная версия обнаруживает qTranslate-X, qTranslate-XT, Polylang и WPML и защищает переводные юридические страницы от случайной перезаписи.
+
+FZ-152 RF Pro автоматически создаёт, публикует и обновляет четыре юридических документа на русском и английском языках, если на сайте настроены RU и EN как два языка. Также Pro переводит собственные тексты согласий, cookie-баннер, ссылки на документы и заглушки карт, видео и iframe.
+
+Для других языков предусмотрена ручная настройка переводов и ссылок. Автоматическая генерация юридических документов на языках, отличных от русского и английского, не предусмотрена.
 
 = Плагин сам проверяет сайт? =
 
@@ -618,13 +638,21 @@ FZ-152 RF помогает с технической частью сайта: co
 
 == Changelog ==
 
+= 0.2.9 =
+* Добавлена поддержка мультиязычных сайтов с qTranslate-X/XT, Polylang и WPML. В Pro доступна автоматическая генерация юридических документов на русском и английском языках, а также перевод согласий, cookie-баннера и заглушек iframe.
+* Бесплатная версия теперь определяет мультиязычные плагины и защищает юридические документы с переводами от случайной перезаписи.
+* Улучшена диагностика сайта: исправлены ложные предупреждения об отсутствии сервисов в мультиязычных политиках, добавлена проверка языковых версий документов.
+* Добавлено сохранение языка согласия в журнале, улучшена обработка встроенных карт, видео и iframe.
+* Повышена совместимость со сторонними мультиязычными плагинами и улучшена работа с исходным содержимым юридических документов через WordPress API.
+
 = 0.2.8 =
-* Добавлен отдельный журнал действий с cookie-баннером, а не только с формами. Он записывает в журнал нажатия кнопок на баннере принять и отклонить, а еще он нафиг не нужен, но слишком частая просьба от сумасшедших юристов. Экспорт в CSV и настройка срока хранения, автоочстка и т.д., всё на вкладке Журнал согласий.
-* Обновлён раздел внешнего вида cookie-баннера: более компактный визуальный конструктор с предпросмотром и более удобными настройками цветов, размеров и кнопок, не идеал, но как было до этого мне вообще не нравилось.
-* Добавлена кнопка «Предложить функцию» для отправки идей разработчику (мне) прямо из настроек плагина. Это не просто так, я реально их читаю и адекватные предложения реализую.
-* Исправлена статистика cookie-баннера: показ и решение посетителя учитываются надёжнее, до этого счётчик считал не верно.
+* Добавлен отдельный журнал действий с cookie-баннером: принятие, отказ и выбранные категории, экспорт в CSV и настройка срока хранения.
+* Обновлён раздел внешнего вида cookie-баннера: компактный визуальный конструктор с предпросмотром и более удобными настройками цветов, размеров и кнопок.
+* Добавлена кнопка «Предложить функцию» для отправки идей разработчику прямо из настроек плагина.
+* Исправлена статистика cookie-баннера: показ и решение посетителя учитываются надёжнее, в том числе при проблемах с хранилищем браузера и временных ошибках доставки запроса.
 * Улучшена диагностика стандартных комментариев WordPress: сканер дополнительно проверяет опубликованные записи с открытыми комментариями.
-* Минимальная обязательная версия PHP для работы плагина снижена с 7.4 до 7.1. Поддержки более старых - не будет.
+* Исправлены пограничные случаи работы cookie-согласия и предпросмотра баннера.
+* Минимальная версия PHP снижена с 7.4 до 7.1.
 
 = 0.2.7 =
 * Добавлено: публичный API для разработчиков и SaaS — PHP API для интеграций, JS API для чтения состояния cookie-согласия и read-only REST API для server-to-server подключений.

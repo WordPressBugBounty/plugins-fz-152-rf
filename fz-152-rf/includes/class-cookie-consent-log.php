@@ -8,7 +8,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 // phpcs:disable WordPress.DB.DirectDatabaseQuery
  
 final class CookieConsentLog {
-	private const DB_VERSION = '1';
+	private const DB_VERSION = '2';
 	private const CLEANUP_HOOK = 'f152_cookie_consent_log_cleanup';
 	private const MAX_BODY_BYTES = 4096;
 	private const CLEANUP_BATCH = 1000;
@@ -106,6 +106,7 @@ final class CookieConsentLog {
 			user_agent VARCHAR(512) NULL,
 			policy_version VARCHAR(50) NULL,
 			policy_url VARCHAR(500) NULL,
+			language VARCHAR(20) NULL,
 			PRIMARY KEY  (id),
 			UNIQUE KEY event_id (event_id),
 			KEY created_at_utc (created_at_utc),
@@ -185,6 +186,11 @@ final class CookieConsentLog {
 			return $response;
 		}
 		$page_url = self::normalize_page_url( $data['page_url'] ?? null );
+		$language_context = apply_filters( 'f152/multilingual/cookie_log_context', [], $data );
+		if ( ! is_array( $language_context ) ) { $language_context = []; }
+		$record_language = isset( $language_context['language'] ) && is_string( $language_context['language'] ) ? substr( sanitize_key( $language_context['language'] ), 0, 20 ) : null;
+		$record_policy = isset( $language_context['policy_url'] ) && is_string( $language_context['policy_url'] )
+			? esc_url_raw( $language_context['policy_url'] ) : \F152\Helpers::document_url( 'f152_link_policy_cookie' );
 		$ua = self::get_user_agent();
 		if ( null === $page_url || self::is_bot( $ua ) ) {
 			return $response;
@@ -209,8 +215,9 @@ final class CookieConsentLog {
 				'ip_address' => get_option( 'f152_cookie_log_capture_ip', 1 ) && '' !== $ip ? $ip : null,
 				'user_agent' => get_option( 'f152_cookie_log_capture_user_agent', 1 ) ? $ua : null,
 				'policy_version' => self::limit_text( API::get_policy_version(), 50 ),
-				'policy_url' => self::limit_text( esc_url_raw( (string) get_option( 'f152_link_policy_cookie', '' ) ), 500 ),
-			], [ '%s', '%s', '%s', '%s', '%d', '%d', '%d', '%s', '%s', '%s', '%s', '%s', '%s' ] );
+				'policy_url' => self::limit_text( $record_policy, 500 ),
+				'language' => $record_language,
+			], [ '%s', '%s', '%s', '%s', '%d', '%d', '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s' ] );
 			 
 		} finally {
 			$wpdb->suppress_errors( $previous );

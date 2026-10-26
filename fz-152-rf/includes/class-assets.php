@@ -328,28 +328,31 @@ final class Assets {
                         ],
 
                         'links' => [
-                                'policy_pd'          => esc_url( (string) get_option('f152_link_policy_pd', '') ),
-                                'consent_pd'         => esc_url( (string) get_option('f152_link_consent_pd', '') ),
-                                'policy_cookie'      => esc_url( (string) get_option('f152_link_policy_cookie', '') ),
-                                'consent_marketing'  => esc_url( (string) get_option('f152_link_consent_marketing', '') ),
+                                'policy_pd'          => esc_url( (string) Helpers::document_url( 'f152_link_policy_pd' ) ),
+                                'consent_pd'         => esc_url( (string) Helpers::document_url( 'f152_link_consent_pd' ) ),
+                                'policy_cookie'      => esc_url( (string) Helpers::document_url( 'f152_link_policy_cookie' ) ),
+                                'consent_marketing'  => esc_url( (string) Helpers::document_url( 'f152_link_consent_marketing' ) ),
                         ],
 
 			'i18n' => [
-				'accept'  => __('Принять', 'fz-152-rf'),
-				'settings'=> __('Настроить', 'fz-152-rf'),
-				'reject'  => __('Отклонить', 'fz-152-rf'),
-				'save'    => __('Сохранить', 'fz-152-rf'),
-				'close'   => __('Закрыть', 'fz-152-rf'),
-				'embed_map_blocked' => __('Карта скрыта до разрешения аналитических cookie.', 'fz-152-rf'),
-				'embed_video_blocked' => __('Видео скрыто до разрешения аналитических cookie.', 'fz-152-rf'),
-				'embed_content_blocked' => __('Внешнее содержимое скрыто до разрешения аналитических cookie.', 'fz-152-rf'),
-				'embed_map_blocked_marketing' => __('Карта скрыта до разрешения маркетинговых cookie.', 'fz-152-rf'),
-				'embed_video_blocked_marketing' => __('Видео скрыто до разрешения маркетинговых cookie.', 'fz-152-rf'),
-				'embed_content_blocked_marketing' => __('Внешнее содержимое скрыто до разрешения маркетинговых cookie.', 'fz-152-rf'),
-				'embed_allow_map' => __('Разрешить и показать карту', 'fz-152-rf'),
-				'embed_allow_video' => __('Разрешить и показать видео', 'fz-152-rf'),
-				'embed_allow' => __('Разрешить и показать', 'fz-152-rf'),
-				'required_message' => __('Для продолжения необходимо дать согласие на обработку персональных данных.', 'fz-152-rf'),
+				'accept'  => Helpers::ui_label( 'accept', __( 'Принять', 'fz-152-rf' ) ),
+				'settings'=> Helpers::ui_label( 'settings', __( 'Настроить', 'fz-152-rf' ) ),
+				'reject'  => Helpers::ui_label( 'reject', __( 'Отклонить', 'fz-152-rf' ) ),
+				'save'    => Helpers::ui_label( 'save', __( 'Сохранить', 'fz-152-rf' ) ),
+				'close'   => Helpers::ui_label( 'close', __( 'Закрыть', 'fz-152-rf' ) ),
+				'embed_map_blocked' => Helpers::ui_label( 'embed_map_blocked', __('Карта скрыта до разрешения аналитических cookie.', 'fz-152-rf') ),
+				'embed_reviews_blocked' => Helpers::ui_label( 'embed_reviews_blocked', __('Отзывы Яндекса скрыты до разрешения аналитических cookie.', 'fz-152-rf') ),
+				'embed_video_blocked' => Helpers::ui_label( 'embed_video_blocked', __('Видео скрыто до разрешения аналитических cookie.', 'fz-152-rf') ),
+				'embed_content_blocked' => Helpers::ui_label( 'embed_content_blocked', __('Внешнее содержимое скрыто до разрешения аналитических cookie.', 'fz-152-rf') ),
+				'embed_map_blocked_marketing' => Helpers::ui_label( 'embed_map_blocked_marketing', __('Карта скрыта до разрешения маркетинговых cookie.', 'fz-152-rf') ),
+				'embed_reviews_blocked_marketing' => Helpers::ui_label( 'embed_reviews_blocked_marketing', __('Отзывы Яндекса скрыты до разрешения маркетинговых cookie.', 'fz-152-rf') ),
+				'embed_video_blocked_marketing' => Helpers::ui_label( 'embed_video_blocked_marketing', __('Видео скрыто до разрешения маркетинговых cookie.', 'fz-152-rf') ),
+				'embed_content_blocked_marketing' => Helpers::ui_label( 'embed_content_blocked_marketing', __('Внешнее содержимое скрыто до разрешения маркетинговых cookie.', 'fz-152-rf') ),
+				'embed_allow_map' => Helpers::ui_label( 'embed_allow_map', __('Разрешить и показать карту', 'fz-152-rf') ),
+				'embed_allow_reviews' => Helpers::ui_label( 'embed_allow_reviews', __('Разрешить и показать отзывы', 'fz-152-rf') ),
+				'embed_allow_video' => Helpers::ui_label( 'embed_allow_video', __('Разрешить и показать видео', 'fz-152-rf') ),
+				'embed_allow' => Helpers::ui_label( 'embed_allow', __('Разрешить и показать', 'fz-152-rf') ),
+				'required_message' => Helpers::ui_label( 'required_message', __('Для продолжения необходимо дать согласие на обработку персональных данных.', 'fz-152-rf') ),
 			],
 
 			'bannerStats' => [
@@ -361,6 +364,7 @@ final class Assets {
 			'cookieLog' => [
 				'enabled' => CookieConsentLog::is_enabled(),
 				'endpointUrl' => rest_url( 'f152/v1/cookie-consent-log' ),
+				'languageContext' => apply_filters( 'f152/multilingual/cookie_client_context', [] ),
 			],
 		];
 	}

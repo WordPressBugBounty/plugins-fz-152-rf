@@ -2,7 +2,7 @@
 /**
  * Plugin Name: FZ-152 RF
  * Description: Банер куки внизу сайта с кнопками принять/отклонить/настройки, не активные чекбоксы у отзывов, комментов и странице заказа WooCommerce, согласно ФЗ 152. Шаблоны с текстом страниц политик и соглашений.
- * Version: 0.2.8
+ * Version: 0.2.9
  * Requires PHP: 7.1
  * Author: Котик
  * License: GPLv2 or later
@@ -13,7 +13,7 @@
 
 if ( ! defined('ABSPATH') ) exit;
 
-define('F152_VERSION', '0.2.8');
+define('F152_VERSION', '0.2.9');
 define('F152_FILE', __FILE__);
 define('F152_DIR', plugin_dir_path(__FILE__));
 define('F152_URL', plugin_dir_url(__FILE__));
@@ -31,6 +31,7 @@ if ( ! defined( 'F152_HAS_CONSULTANTS_SERVICE_TAB' ) ) {
 }
 
 require_once F152_DIR . 'includes/helpers.php';
+require_once F152_DIR . 'includes/class-multilingual-safety.php';
 require_once F152_DIR . 'includes/class-assets.php';
 require_once F152_DIR . 'includes/class-consent.php';
 require_once F152_DIR . 'includes/class-consent-log.php';
@@ -45,6 +46,8 @@ require_once F152_DIR . 'includes/class-service-catalog.php';
 require_once F152_DIR . 'includes/class-policy-services.php';
 require_once F152_DIR . 'includes/class-policy-snapshots.php';
 require_once F152_DIR . 'includes/class-form-signals.php';
+require_once F152_DIR . 'includes/class-external-domain-signals.php';
+require_once F152_DIR . 'includes/class-scanner-checks.php';
 require_once F152_DIR . 'includes/class-service-scanner.php';
 require_once F152_DIR . 'includes/class-service-inventory.php';
 require_once F152_DIR . 'includes/class-survey.php';
@@ -68,6 +71,7 @@ if ( class_exists( '\F152\PolicySnapshots' ) ) {
 }
 
 add_action( 'init', [ '\F152\Helpers', 'maybe_migrate_legacy_default_texts' ], 1 );
+ 
 
 if ( ! function_exists( 'f152_get_capabilities' ) ) {
 	function f152_get_capabilities() : array {
