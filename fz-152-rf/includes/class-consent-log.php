@@ -8,7 +8,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 // phpcs:disable WordPress.DB.DirectDatabaseQuery
 final class ConsentLog {
 
-	private const DB_VERSION = '4';
+	private const DB_VERSION = '5';
 
 	public static function get_table_name(): string {
 		global $wpdb;
@@ -66,8 +66,42 @@ final class ConsentLog {
 
 		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 		dbDelta( $sql );
+		self::ensure_phone_column();
 
-		update_option( 'f152_consent_log_db_version', self::DB_VERSION );
+		if ( self::table_has_insert_columns() ) {
+			update_option( 'f152_consent_log_db_version', self::DB_VERSION );
+		}
+	}
+
+	private static function table_has_insert_columns(): bool {
+		global $wpdb;
+		if ( ! self::table_exists() ) {
+			return false;
+		}
+		$table = self::get_table_name();
+		$columns = $wpdb->get_col(
+			$wpdb->prepare(
+				'SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s',
+				$table
+			)
+		);
+		if ( ! is_array( $columns ) ) {
+			return false;
+		}
+		$required = [
+			'id', 'created_at', 'source_type', 'source_id', 'email',
+			'full_name', 'phone', 'user_id', 'ip_address', 'user_agent',
+			'consent_text', 'policy_version', 'policy_url', 'language',
+			'source_uid', 'source_plugin', 'source_label', 'page_url',
+			'form_id', 'form_title', 'consent_hash', 'context',
+		];
+		return count( array_diff( $required, $columns ) ) === 0;
+	}
+
+	public static function maybe_upgrade(): void {
+		if ( (string) get_option( 'f152_consent_log_db_version', '' ) !== self::DB_VERSION ) {
+			self::maybe_create_table();
+		}
 	}
 
 	public static function maybe_create_table(): bool {
@@ -79,9 +113,8 @@ final class ConsentLog {
 
 		self::create_table();
 
-		self::ensure_phone_column();
-
-		return self::table_exists();
+		return ( (string) get_option( 'f152_consent_log_db_version', '' ) === self::DB_VERSION )
+			&& self::table_exists();
 	}
 
 	private static function ensure_phone_column(): void {
@@ -94,7 +127,13 @@ final class ConsentLog {
 		$table_name = self::get_table_name();
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- DESCRIBE is a safe schema probe; table name comes from $wpdb->prefix + literal, no user input, cannot be injected.
-		$columns = $wpdb->get_results( "DESCRIBE `{$table_name}`", ARRAY_A );
+		$columns = $wpdb->get_results(
+			$wpdb->prepare(
+				'SELECT COLUMN_NAME AS Field FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s',
+				$table_name
+			),
+			ARRAY_A
+		);
 		if ( ! is_array( $columns ) ) {
 			return;
 		}
@@ -224,6 +263,12 @@ final class ConsentLog {
 
 		$result = $wpdb->insert( $table_name, $insert_data, $format );
 
+		if ( false === $result ) {
+			do_action( 'f152/consent_log_failed', [
+				'_f152_error' => 'database_insert_failed',
+				'source_type' => $source_type,
+			] );
+		}
 		return $result !== false;
 	}
 

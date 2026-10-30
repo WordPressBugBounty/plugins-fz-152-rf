@@ -5,7 +5,6 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
- 
 final class MultilingualSafety {
 	 
 	public static function providers(): array {

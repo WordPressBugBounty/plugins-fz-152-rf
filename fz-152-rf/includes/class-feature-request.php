@@ -3,12 +3,7 @@ namespace F152;
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
- 
-
-
-
-
-final class FeatureRequest {
+ final class FeatureRequest {
 	private const AJAX_ACTION = 'f152_submit_feature_request';
 	private const NONCE_ACTION = 'f152_feature_request';
 	private const MAX_LENGTH = 4000;

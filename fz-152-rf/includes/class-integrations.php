@@ -8,6 +8,7 @@ final class Integrations {
 		if ( ! get_option('f152_enabled', 1) ) return;
 		add_action('comment_form_after_fields',      [__CLASS__, 'render_wp_comment_checkbox']);
 		add_action('comment_form_logged_in_after',   [__CLASS__, 'render_wp_comment_checkbox']);
+		add_action('wpdiscuz_button_actions', [__CLASS__, 'render_wpdiscuz_fallback_checkbox'], 20, 3);
 		add_filter('preprocess_comment',             [__CLASS__, 'validate_wp_comment']);
 		add_action('comment_post',                   [__CLASS__, 'save_comment_meta'], 10, 3);
 
@@ -21,6 +22,7 @@ final class Integrations {
 	
 			add_action('woocommerce_register_form',       [__CLASS__, 'render_register_checkbox'], 9);
 			add_filter('woocommerce_registration_errors', [__CLASS__, 'validate_register'], 10, 3);
+			add_filter('woocommerce_process_registration_errors', [__CLASS__, 'validate_account_registration'], 10, 4);
 			add_action('woocommerce_created_customer',    [__CLASS__, 'save_register_consent'], 10, 3);
 		}
 	}
@@ -73,6 +75,19 @@ final class Integrations {
                 </p>
                 <?php
         }
+
+	public static function render_wpdiscuz_fallback_checkbox() : void {
+		if ( self::pro_handles_wpdiscuz() ) {
+			return;
+		}
+		self::render_wp_comment_checkbox();
+	}
+
+	private static function pro_handles_wpdiscuz() : bool {
+		return class_exists( '\F152Pro\License\LicenseGate' )
+			&& \F152Pro\License\LicenseGate::can_use( 'wpdiscuz' )
+			&& '1' === (string) get_option( 'f152_pro_integration_wpdiscuz', '1' );
+	}
 
 	private static function is_elementor_context_active() : bool {
 		// phpcs:disable WordPress.Security.NonceVerification.Recommended -- read-only editor/preview detection, no data persisted.
@@ -189,6 +204,10 @@ final class Integrations {
 
 		$wpdiscuz_loaded = defined( 'WPDISCUZ_VERSION' ) || class_exists( 'WpdiscuzCore' );
 		if ( ! $wpdiscuz_loaded ) {
+			return false;
+		}
+
+		if ( ! self::pro_handles_wpdiscuz() ) {
 			return false;
 		}
 
@@ -376,6 +395,24 @@ final class Integrations {
 			<?php wp_nonce_field( 'f152_register_consent', 'f152_register_consent_nonce' ); ?>
 		</div>
 		<?php
+	}
+
+	public static function validate_account_registration( \WP_Error $errors, $username, $password, $email ) : \WP_Error {
+		if ( ! (bool) get_option( 'f152_register_enable', 1 ) || is_admin() ) {
+			return $errors;
+		}
+
+		$present_raw = filter_input( INPUT_POST, 'f152_register_consent_present', FILTER_UNSAFE_RAW );
+		$present     = is_string( $present_raw ) ? sanitize_text_field( wp_unslash( $present_raw ) ) : '';
+		if ( $present !== '1' ) {
+			$errors->add(
+				'f152_register_consent_missing',
+				__( 'Для регистрации требуется согласие на обработку персональных данных.', 'fz-152-rf' )
+			);
+			return $errors;
+		}
+
+		return self::validate_register( $errors, $username, $email );
 	}
 
 	public static function validate_register( \WP_Error $errors, $username, $email ) : \WP_Error {
